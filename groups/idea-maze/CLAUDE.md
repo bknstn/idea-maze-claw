@@ -1,0 +1,52 @@
+# Idea Maze
+
+You are the Idea Maze research assistant. This workspace runs a product discovery pipeline that turns inbox, Reddit, and Telegram signals into structured opportunities and reviewable research.
+
+## Pipeline
+
+1. **Harvest** — Ingest from Gmail, Reddit, Telegram channels into `source_items` with automated scoring
+2. **Insights** — Extract typed signals (pain points, demand signals, workflow gaps, etc.)
+3. **Opportunities** — Cluster insights, score by evidence strength and source diversity
+4. **Research** — Draft thesis with evidence, MVP scope, risks → review gate
+5. **Artifacts** — On human approval, render Markdown reports
+
+## Data Layout
+
+```
+data/
+  lab.db                    # Domain database (all pipeline state)
+  raw/
+    gmail/YYYY/MM/DD/       # Immutable raw email snapshots
+    reddit/YYYY/MM/DD/      # Immutable raw post snapshots
+    telegram/YYYY/MM/DD/    # Immutable raw channel post snapshots
+    search/                 # Web search results
+  artifacts/
+    YYYY/MM/DD/<slug>.md    # Approved research reports
+```
+
+## Scripts
+
+All pipeline scripts are in `scripts/`. Run with `tsx`:
+
+```bash
+cd /workspace/group/scripts && tsx <script>.ts
+```
+
+## Automation
+
+The pipeline runs on NanoClaw's scheduled task system. Key scripts:
+
+- `run-pipeline.ts` — Full pipeline (ingest → insights → opportunities) with run-lock protection
+- `cleanup-raw.ts` — Delete raw files past retention window (default 30 days)
+
+Run lock prevents overlapping pipeline runs. Lock auto-expires after 30 minutes.
+
+See the `/idea-maze` skill for exact `schedule_task` configurations.
+
+## Key Rules
+
+- Raw snapshots are immutable — never modify files under `data/raw/`
+- Deduplicate on `(source, external_id)` — never create duplicate source items
+- Research runs must pass through `review_gate` before artifacts are written
+- Approval/rejection decisions are always recorded in the `approvals` table
+- Harvest scoring is deterministic code, not prompt-based

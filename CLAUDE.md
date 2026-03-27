@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # NanoClaw
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
@@ -20,6 +24,43 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+
+## Architecture
+
+Message flow: channel receives message → `src/index.ts` checks trigger pattern → enqueues in `GroupQueue` → `container-runner.ts` spawns OCI container with group folder mounted → agent runs inside container and outputs JSON → `router.ts` strips `<internal>` tags and routes reply back to channel.
+
+Container isolation: each invocation gets a fresh container with read-only project root mount + read-write group folder. OneCLI SDK injects credentials at request time — secrets never passed to containers directly. Bash commands inside containers are safe because they run in the isolated Linux VM, not on host.
+
+Memory: per-group `CLAUDE.md` in `groups/{name}/`, global `CLAUDE.md` in `groups/global/` (readable by all agents, writable only from main group).
+
+## Development
+
+Run commands directly—don't tell the user to run them.
+
+```bash
+npm run dev          # Run with hot reload
+npm run build        # Compile TypeScript
+npm run test         # Run all tests (vitest)
+npm run lint         # Check code style
+npm run lint:fix     # Auto-fix linting
+npm run format:fix   # Auto-format with Prettier
+./container/build.sh # Rebuild agent container
+```
+
+To run a single test file: `npx vitest run src/container-runner.test.ts`
+
+Service management:
+```bash
+# macOS (launchd)
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
+
+# Linux (systemd)
+systemctl --user start nanoclaw
+systemctl --user stop naunclaw
+systemctl --user restart nanoclaw
+```
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
@@ -47,29 +88,6 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 ## Contributing
 
 Before creating a PR, adding a skill, or preparing any contribution, you MUST read [CONTRIBUTING.md](CONTRIBUTING.md). It covers accepted change types, the four skill types and their guidelines, SKILL.md format rules, PR requirements, and the pre-submission checklist (searching for existing PRs/issues, testing, description format).
-
-## Development
-
-Run commands directly—don't tell the user to run them.
-
-```bash
-npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
-```
-
-Service management:
-```bash
-# macOS (launchd)
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
-
-# Linux (systemd)
-systemctl --user start nanoclaw
-systemctl --user stop nanoclaw
-systemctl --user restart nanoclaw
-```
 
 ## Troubleshooting
 

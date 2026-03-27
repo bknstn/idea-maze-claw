@@ -13,8 +13,11 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/idea-maze/
 groups/main/*
 groups/global/*
+groups/idea-maze/data/
+groups/idea-maze/logs/
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 
