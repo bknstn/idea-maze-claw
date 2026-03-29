@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
+  NanoClaw fork with an Idea Maze product discovery pipeline. Harvests signals from Gmail, Reddit, and Telegram channels → extracts insights → clusters opportunities → drafts research with human approval gating.
 </p>
 
 <p align="center">
@@ -23,27 +23,25 @@
 
 NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
 
-## Quick Start
+## Setup
+
+This is a personal fork. To set up on a new machine:
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
-cd nanoclaw
+git clone <this-repo>
+cd idea-maze-claw
+npm install
+npm run build
 claude
 ```
 
-<details>
-<summary>Without GitHub CLI</summary>
+Then run `/setup` to configure Telegram and OneCLI credentials. Initialize the pipeline database:
 
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
-2. `git clone https://github.com/<your-username>/nanoclaw.git`
-3. `cd nanoclaw`
-4. `claude`
+```bash
+cd groups/idea-maze/scripts && npx tsx init-db.ts
+```
 
-</details>
-
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
-
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
+> **Note:** Commands prefixed with `/` are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt.
 
 ## Philosophy
 
@@ -64,33 +62,60 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
 
+## Idea Maze Pipeline
+
+The `groups/idea-maze/` workspace runs a five-stage product discovery pipeline:
+
+| Stage | Script | Output |
+|-------|--------|--------|
+| **Harvest** | `ingest-gmail.ts`, `ingest-reddit.ts`, `ingest-telegram.ts` | `source_items` with harvest scores |
+| **Insights** | `extract-insights.ts` | Typed signals: pain points, demand signals, workflow gaps, etc. |
+| **Opportunities** | `refresh-opportunities.ts` | Clustered opportunities scored by evidence and diversity |
+| **Research** | `research-opportunity.ts <slug>` | Draft thesis → lands in `review_gate` |
+| **Artifacts** | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` |
+
+Pipeline state lives in `groups/idea-maze/data/lab.db` (separate from NanoClaw's `store/messages.db`). Raw snapshots are immutable. Research runs require human approval before artifacts are written.
+
+Full pipeline runs automatically on a schedule via NanoClaw's task system. Run `tsx run-pipeline.ts` to trigger manually.
+
 ## What It Supports
 
-- **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
-- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in Docker (macOS/Linux), [Docker Sandboxes](docs/docker-sandboxes.md) (micro VM isolation), or Apple Container (macOS)
+- **Telegram operator interface** - Control the pipeline, trigger harvests, review/approve research runs, and check status from Telegram
+- **Idea Maze pipeline** - Automated ingestion from Gmail, Reddit, and Telegram channels with scoring, insight extraction, opportunity clustering, and approval-gated research
+- **Isolated group context** - Each group has its own `CLAUDE.md` memory and isolated filesystem; the `idea-maze` group is the dedicated pipeline workspace
+- **Main channel** - Your private Telegram self-chat for admin control; pipeline group is completely isolated
+- **Scheduled tasks** - Recurring pipeline jobs: ingest every hour, insights every 2h, opportunity refresh daily at 06:00, weekly digest Monday at 08:00, raw cleanup nightly
+- **Web access** - Search and fetch content from the Web (used during research drafting)
+- **Container isolation** - Agents run in Linux containers with only the group folder mounted
 - **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
 
-Talk to your assistant with the trigger word (default: `@Andy`):
+Talk to the assistant with the trigger word (default: `@Andy`) from Telegram:
 
+**Pipeline control (from the idea-maze chat):**
 ```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+@Andy run harvest
+@Andy extract insights
+@Andy refresh opportunities
+@Andy research <opportunity-slug>
+@Andy show pending research runs
+@Andy approve run 42
+@Andy reject run 42 not enough evidence
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+**Status and queries:**
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+@Andy pipeline status
+@Andy top opportunities
+@Andy show recent insights
+```
+
+**From the main channel (your self-chat):**
+```
+@Andy list all scheduled tasks
+@Andy pause the pipeline schedule
+@Andy set reddit subreddits to ["SaaS","indiehackers","webdev"]
 ```
 
 ## Customizing
@@ -131,12 +156,14 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Telegram --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+                                              |
+                                    groups/idea-maze/
+                                      scripts/*.ts
+                                      data/lab.db
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
-
-For the full architecture details, see the [documentation site](https://docs.nanoclaw.dev/concepts/architecture).
+Single Node.js process. Telegram registers as the operator channel at startup. Agents execute in isolated Linux containers with only the group folder mounted. The idea-maze group runs the discovery pipeline; the main chat is for admin control.
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
@@ -147,7 +174,10 @@ Key files:
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+- `groups/idea-maze/CLAUDE.md` - Idea Maze workspace memory
+- `groups/idea-maze/scripts/` - Pipeline scripts (ingest, insights, opportunities, research, approval)
+- `groups/idea-maze/data/lab.db` - Domain database (source items, insights, opportunities, runs, artifacts)
+- `container/skills/idea-maze/SKILL.md` - Container skill loaded into the idea-maze agent
 
 ## FAQ
 
