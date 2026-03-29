@@ -464,7 +464,10 @@ export async function processTaskIpc(
 
     case 'restart':
       if (isMain) {
-        logger.info({ sourceGroup }, 'Restart requested via IPC — exiting for service manager restart');
+        logger.info(
+          { sourceGroup },
+          'Restart requested via IPC — exiting for service manager restart',
+        );
         setTimeout(() => process.exit(0), 500);
       } else {
         logger.warn({ sourceGroup }, 'Unauthorized restart attempt blocked');
