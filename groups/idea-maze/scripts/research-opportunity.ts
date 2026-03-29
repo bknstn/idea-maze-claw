@@ -9,7 +9,7 @@
 
 import { getDb, closeDb } from "./lib/db.ts";
 import { initSchema } from "./lib/schema.ts";
-import { isLlmConfigured, generateJson } from "./lib/llm.ts";
+import { isLlmConfigured, generateResearchJson as generateJson } from "./lib/llm.ts";
 import { RESEARCH_SYSTEM_PROMPT, buildResearchUserPrompt } from "./lib/prompts.ts";
 
 // --- Types ---

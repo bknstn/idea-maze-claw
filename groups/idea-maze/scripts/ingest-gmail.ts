@@ -47,15 +47,41 @@ function rawPath(messageId: string, timestamp: Date): string {
   return resolve(GROUP_DIR, "data", "raw", "gmail", String(y), m, d, `${messageId}.json`);
 }
 
-function getAccessToken(): string {
-  const token = process.env.GMAIL_ACCESS_TOKEN;
-  if (!token) {
+async function getAccessToken(): Promise<string> {
+  // Prefer a pre-set access token (OneCLI injects this inside containers)
+  if (process.env.GMAIL_ACCESS_TOKEN) return process.env.GMAIL_ACCESS_TOKEN;
+
+  // Fall back to refreshing via client credentials
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
     throw new Error(
-      "GMAIL_ACCESS_TOKEN not set. Inside containers, OneCLI injects this automatically. " +
-        "For local testing, set it manually or use 'gcloud auth print-access-token'.",
+      "Gmail credentials not set. Need GMAIL_ACCESS_TOKEN or " +
+        "GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN.",
     );
   }
-  return token;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to refresh Gmail token: ${res.status} ${body}`);
+  }
+
+  const data = await res.json();
+  if (!data.access_token) throw new Error("No access_token in refresh response");
+  return data.access_token;
 }
 
 async function gmailFetch(path: string, token: string): Promise<any> {
@@ -104,7 +130,7 @@ async function main() {
   const db = getDb();
   initSchema(db);
 
-  const token = getAccessToken();
+  const token = await getAccessToken();
   const query: string = getAppState("gmail_query") ?? DEFAULT_QUERY;
   const maxResults = DEFAULT_MAX_RESULTS;
 
