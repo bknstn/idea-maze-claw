@@ -158,15 +158,20 @@ export function buildResearchUserPrompt(opp: {
   telegram_evidence: string[];
   reddit_evidence: string[];
   external_research: string[];
+  search_synthesis?: string[];
 }): string {
   const fmtList = (items: string[]) => items.length ? items.map((s) => `- ${s}`).join("\n") : "- None";
+
+  const synthSection = opp.search_synthesis?.length
+    ? `\n## Web Search Synthesis\n${opp.search_synthesis.map((a, i) => `Query ${i + 1}: ${a}`).join("\n\n")}\n`
+    : "";
 
   return `Research this opportunity and produce a detailed draft.
 
 Opportunity: ${opp.slug}
 Title: ${opp.title}
 Current Thesis: ${opp.thesis}
-
+${synthSection}
 ## Evidence from Inbox
 ${fmtList(opp.inbox_evidence)}
 
