@@ -1,8 +1,8 @@
 /**
  * Research drafting — creates a research run for an opportunity.
  *
- * Loads the opportunity and linked source items, optionally performs
- * web enrichment, builds a draft, and moves the run to review_gate.
+ * Loads the opportunity and linked source items, optionally enriches
+ * with Tavily web search, builds a draft, and moves the run to review_gate.
  *
  * Usage: tsx research-opportunity.ts <slug-or-topic>
  */
@@ -11,6 +11,11 @@ import { getDb, closeDb } from "./lib/db.ts";
 import { initSchema } from "./lib/schema.ts";
 import { isLlmConfigured, generateJson } from "./lib/llm.ts";
 import { RESEARCH_SYSTEM_PROMPT, buildResearchUserPrompt } from "./lib/prompts.ts";
+import {
+  enrichOpportunityWithSearch,
+  isSearchConfigured,
+  type SearchEvidenceItem,
+} from "./lib/search.ts";
 
 // --- Types ---
 
@@ -43,11 +48,12 @@ function harvestScoreFromMeta(metaStr: string): number {
 async function buildLlmDraft(
   opp: { slug: string; title: string; thesis: string },
   sourceItems: any[],
+  searchItems: SearchEvidenceItem[],
 ): Promise<Omit<ResearchDraft, "opportunity_slug" | "source_refs">> {
   const inbox = sourceItems.filter((s) => s.source === "gmail").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
   const telegram = sourceItems.filter((s) => s.source === "telegram").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
   const reddit = sourceItems.filter((s) => s.source === "reddit").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
-  const external = sourceItems.filter((s) => s.source === "search").slice(0, 5).map((s: any) => s.title || s.text.slice(0, 180));
+  const external = searchItems.slice(0, 5).map((s) => s.title || s.text.slice(0, 180));
 
   const prompt = buildResearchUserPrompt({
     slug: opp.slug,
@@ -68,11 +74,12 @@ async function buildLlmDraft(
 function buildTemplateDraft(
   opp: { slug: string; title: string; thesis: string; cluster_key: string },
   sourceItems: any[],
+  searchItems: SearchEvidenceItem[],
 ): Omit<ResearchDraft, "opportunity_slug" | "source_refs"> {
   const inbox = sourceItems.filter((s) => s.source === "gmail").slice(0, 5).map((s: any) => s.text.slice(0, 220));
   const telegram = sourceItems.filter((s) => s.source === "telegram").slice(0, 5).map((s: any) => s.text.slice(0, 220));
   const reddit = sourceItems.filter((s) => s.source === "reddit").slice(0, 5).map((s: any) => s.text.slice(0, 220));
-  const external = sourceItems.filter((s) => s.source === "search").slice(0, 5).map((s: any) => s.title || s.text.slice(0, 180));
+  const external = searchItems.slice(0, 5).map((s) => s.title || s.text.slice(0, 180));
 
   return {
     thesis: opp.thesis,
@@ -155,31 +162,69 @@ async function main() {
 
   console.log(`Found ${sourceItems.length} linked source items.`);
 
+  let searchItems: SearchEvidenceItem[] = [];
+  let searchTrace: {
+    provider: string;
+    queries: string[];
+    result_count: number;
+    source_item_ids: number[];
+  } | null = null;
+
+  if (isSearchConfigured()) {
+    try {
+      const enrichment = await enrichOpportunityWithSearch(
+        { title: opp.title, cluster_key: opp.cluster_key },
+        sourceItems,
+        runId,
+      );
+      searchItems = enrichment.items;
+      searchTrace = {
+        provider: enrichment.provider,
+        queries: enrichment.queries,
+        result_count: enrichment.items.length,
+        source_item_ids: enrichment.item_ids,
+      };
+      console.log(
+        `Search enrichment: ${searchItems.length} result(s) across ${enrichment.queries.length} quer${enrichment.queries.length === 1 ? "y" : "ies"}.`,
+      );
+    } catch (err) {
+      console.warn(`Search enrichment failed, continuing without external research: ${err}`);
+    }
+  } else {
+    console.log("No TAVILY_API_KEY — skipping web enrichment.");
+  }
+
   // Build draft
   let draftBody: Omit<ResearchDraft, "opportunity_slug" | "source_refs">;
 
   if (isLlmConfigured()) {
     try {
       console.log("Building draft via LLM...");
-      draftBody = await buildLlmDraft(opp, sourceItems);
+      draftBody = await buildLlmDraft(opp, sourceItems, searchItems);
     } catch (err) {
       console.warn(`LLM draft failed, using template: ${err}`);
-      draftBody = buildTemplateDraft(opp, sourceItems);
+      draftBody = buildTemplateDraft(opp, sourceItems, searchItems);
     }
   } else {
     console.log("No ANTHROPIC_API_KEY — using template draft.");
-    draftBody = buildTemplateDraft(opp, sourceItems);
+    draftBody = buildTemplateDraft(opp, sourceItems, searchItems);
   }
 
   const draft: ResearchDraft = {
     opportunity_slug: opp.slug,
     ...draftBody,
-    source_refs: sourceItems.map((s: any) => s.id),
+    source_refs: [...new Set([...sourceItems.map((s: any) => s.id), ...searchItems.map((s) => s.id)])],
   };
 
   // Store draft in run metadata and move to review_gate
   db.prepare("UPDATE runs SET status = 'review_gate', metadata_json = ? WHERE id = ?").run(
-    JSON.stringify({ draft }),
+    JSON.stringify({
+      draft,
+      research_trace: {
+        source_item_count: sourceItems.length,
+        external_search: searchTrace,
+      },
+    }),
     runId,
   );
 

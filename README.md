@@ -71,7 +71,7 @@ The `groups/idea-maze/` workspace runs a five-stage product discovery pipeline:
 | **Harvest** | `ingest-gmail.ts`, `ingest-reddit.ts`, `ingest-telegram.ts` | `source_items` with harvest scores |
 | **Insights** | `extract-insights.ts` | Typed signals: pain points, demand signals, workflow gaps, etc. |
 | **Opportunities** | `refresh-opportunities.ts` | Clustered opportunities scored by evidence and diversity |
-| **Research** | `research-opportunity.ts <slug>` | Draft thesis → lands in `review_gate` |
+| **Research** | `research-opportunity.ts <slug>` | Draft thesis with optional web enrichment → lands in `review_gate` |
 | **Artifacts** | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` |
 
 Pipeline state lives in `groups/idea-maze/data/lab.db` (separate from NanoClaw's `store/messages.db`). Raw snapshots are immutable. Research runs require human approval before artifacts are written.
@@ -85,7 +85,7 @@ Full pipeline runs automatically on a schedule via NanoClaw's task system. Run `
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory and isolated filesystem; the `idea-maze` group is the dedicated pipeline workspace
 - **Main channel** - Your private Telegram self-chat for admin control; pipeline group is completely isolated
 - **Scheduled tasks** - Recurring pipeline jobs: ingest every hour, insights every 2h, opportunity refresh daily at 06:00, weekly digest Monday at 08:00, raw cleanup nightly
-- **Web access** - Search and fetch content from the Web (used during research drafting)
+- **Web access** - Search and fetch content from the Web during research drafting when `TAVILY_API_KEY` is available
 - **Container isolation** - Agents run in Linux containers with only the group folder mounted
 - **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
 
