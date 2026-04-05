@@ -43,6 +43,12 @@ cd groups/idea-maze/scripts && npx tsx init-db.ts
 
 For a deployed VPS, use `./scripts/monitor-vps.sh` for a one-command health summary of the server, NanoClaw service, OneCLI, and Idea Maze databases. Add `--follow` to tail live service logs.
 
+To restore the default Idea Maze automation after setup or a fresh deploy, run:
+
+```bash
+npx tsx scripts/setup-idea-maze-schedule.ts
+```
+
 > **Note:** Commands prefixed with `/` are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt.
 
 ## Philosophy
@@ -70,7 +76,7 @@ The `groups/idea-maze/` workspace runs a five-stage product discovery pipeline:
 
 | Stage | Script | Output |
 |-------|--------|--------|
-| **Harvest** | `ingest-gmail.ts`, `ingest-reddit.ts`, `ingest-telegram.ts` | `source_items` with harvest scores |
+| **Harvest** | `ingest-reddit.ts` | `source_items` with harvest scores |
 | **Insights** | `extract-insights.ts` | Typed signals: pain points, demand signals, workflow gaps, etc. |
 | **Opportunities** | `refresh-opportunities.ts` | Clustered opportunities scored by evidence and diversity |
 | **Research** | `research-opportunity.ts <slug>` | Draft thesis with optional web enrichment → lands in `review_gate` |
@@ -83,10 +89,10 @@ Full pipeline runs automatically on a schedule via NanoClaw's task system. Run `
 ## What It Supports
 
 - **Telegram operator interface** - Control the pipeline, trigger harvests, review/approve research runs, and check status from Telegram
-- **Idea Maze pipeline** - Automated ingestion from Gmail, Reddit, and Telegram channels with scoring, insight extraction, opportunity clustering, and approval-gated research
+- **Idea Maze pipeline** - Automated Reddit ingestion with scoring, insight extraction, opportunity clustering, and approval-gated research
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory and isolated filesystem; the `idea-maze` group is the dedicated pipeline workspace
 - **Main channel** - Your private Telegram self-chat for admin control; pipeline group is completely isolated
-- **Scheduled tasks** - Recurring pipeline jobs: ingest every hour, insights every 2h, opportunity refresh daily at 06:00, weekly digest Monday at 08:00, raw cleanup nightly
+- **Scheduled tasks** - Recurring pipeline jobs: hourly pipeline run, weekly digest Monday at 08:00, raw cleanup nightly
 - **Web access** - Search and fetch content from the Web during research drafting when `TAVILY_API_KEY` is available
 - **Container isolation** - Agents run in Linux containers with only the group folder mounted
 - **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.

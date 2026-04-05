@@ -256,4 +256,38 @@ describe('container-runner timeout behavior', () => {
     expect(containerArgs).toContain('-e');
     expect(containerArgs).toContain('TAVILY_API_KEY=tvly-test-key');
   });
+
+  it('runs the container as root on root-owned hosts', async () => {
+    const getuidSpy = vi.spyOn(process, 'getuid').mockReturnValue(0);
+    const getgidSpy = vi.spyOn(process, 'getgid').mockReturnValue(0);
+
+    try {
+      const resultPromise = runContainerAgent(
+        testGroup,
+        testInput,
+        () => {},
+        async () => {},
+      );
+
+      emitOutputMarker(fakeProc, {
+        status: 'success',
+        result: 'Done',
+        newSessionId: 'session-root-host',
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      fakeProc.emit('close', 0);
+      await vi.advanceTimersByTimeAsync(10);
+      await resultPromise;
+
+      const spawnMock = vi.mocked(spawn);
+      const containerArgs = spawnMock.mock.calls.at(-1)?.[1] ?? [];
+
+      expect(containerArgs).toContain('--user');
+      expect(containerArgs).toContain('0:0');
+      expect(containerArgs).toContain('HOME=/home/node');
+    } finally {
+      getuidSpy.mockRestore();
+      getgidSpy.mockRestore();
+    }
+  });
 });

@@ -263,13 +263,14 @@ async function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
-  // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
+  // Run as the host UID for writable bind mounts.
+  // Root-owned Linux deployments commonly check the repo out under /root, which
+  // makes writable mounts fail for the image's default node user (uid 1000).
+  // Keep uid 1000 on non-root Linux hosts so the image default still works.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
+  if (hostUid != null && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid ?? hostUid}`);
     args.push('-e', 'HOME=/home/node');
   }
 

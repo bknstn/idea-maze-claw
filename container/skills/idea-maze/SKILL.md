@@ -1,6 +1,6 @@
 ---
 name: idea-maze
-description: Run Idea Maze research pipeline — harvest sources, extract insights, cluster opportunities, draft research. Use when the user mentions harvesting, ingesting, insights, opportunities, research pipeline, or scoring.
+description: Run Idea Maze research pipeline — harvest Reddit signals, extract insights, cluster opportunities, draft research. Use when the user mentions harvesting, ingesting, insights, opportunities, research pipeline, or scoring.
 ---
 
 # Idea Maze Research Pipeline
@@ -55,7 +55,7 @@ This lets the user know the request was received while the work runs.
 ## Data Locations
 
 - Database: `/workspace/group/data/lab.db`
-- Raw snapshots: `/workspace/group/data/raw/{gmail,telegram,reddit}/`
+- Raw snapshots: `/workspace/group/data/raw/`
 - Artifacts: `/workspace/group/data/artifacts/`
 
 ## Quick Status
@@ -97,43 +97,11 @@ Set up recurring jobs using `mcp__nanoclaw__schedule_task`. All tasks target the
 
 ### Recommended schedule
 
-**Full pipeline** (ingestion + insights + opportunities) — every 60 minutes:
+**Full pipeline** (Reddit ingest + insights + opportunities) — every 60 minutes:
 ```
-prompt: "Run the full harvest pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report results summary."
+prompt: "Run the active Idea Maze pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report a concise results summary."
 schedule_type: interval
 schedule_value: "3600000"
-context_mode: isolated
-script: |
-  cd /workspace/group/scripts
-  RESULT=$(tsx -e "import{getDb}from'./lib/db.ts';import{acquireRunLock}from'./lib/queries.ts';const db=getDb();const ok=acquireRunLock('pipeline',1800000);if(!ok){console.log('locked')}else{const n=(db.prepare(\"SELECT COUNT(*)as n FROM source_items WHERE ingested_at_utc > datetime('now','-2 hours')\").get()).n;console.log(n)}" 2>/dev/null)
-  if [ "$RESULT" = "locked" ]; then
-    echo '{"wakeAgent": false}'
-  else
-    echo '{"wakeAgent": true}'
-  fi
-```
-
-**Insight extraction** — every 2 hours:
-```
-prompt: "Extract insights from unprocessed items. Execute: cd /workspace/group/scripts && tsx extract-insights.ts. Report how many insights were created."
-schedule_type: cron
-schedule_value: "0 */2 * * *"
-context_mode: isolated
-script: |
-  cd /workspace/group/scripts
-  COUNT=$(tsx -e "import{getDb}from'./lib/db.ts';import{getUnprocessedItems}from'./lib/queries.ts';console.log(getUnprocessedItems(1).length)" 2>/dev/null)
-  if [ "$COUNT" = "0" ]; then
-    echo '{"wakeAgent": false}'
-  else
-    echo '{"wakeAgent": true, "data": {"unprocessed": '$COUNT'}}'
-  fi
-```
-
-**Opportunity refresh** — daily at 06:00:
-```
-prompt: "Refresh opportunity clusters. Execute: cd /workspace/group/scripts && tsx refresh-opportunities.ts. Send a brief summary of top 5 opportunities by score."
-schedule_type: cron
-schedule_value: "0 6 * * *"
 context_mode: isolated
 ```
 
@@ -163,7 +131,7 @@ script: |
 
 ### Setting up the schedule
 
-When the user asks to "set up the pipeline schedule" or "start automation", call `mcp__nanoclaw__schedule_task` for each job above. Use `target_group_jid` if scheduling from the main chat for the idea-maze group.
+When the user asks to "set up the pipeline schedule" or "start automation", schedule the three jobs above. Use `target_group_jid` if scheduling from the main chat for the idea-maze group.
 
 ### Run lock
 
