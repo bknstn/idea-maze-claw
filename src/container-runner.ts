@@ -16,6 +16,7 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -56,6 +57,18 @@ interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
+}
+
+function applyExplicitContainerEnv(args: string[]): void {
+  // Tavily search currently authenticates with a request-body key in the
+  // Idea Maze worker, so OneCLI's generic header injection cannot satisfy it.
+  // Keep the raw key exposure as narrow as possible and pass through only this
+  // one optional variable from the host environment.
+  const envConfig = readEnvFile(['TAVILY_API_KEY']);
+  const tavilyApiKey = process.env.TAVILY_API_KEY || envConfig.TAVILY_API_KEY;
+  if (tavilyApiKey) {
+    args.push('-e', `TAVILY_API_KEY=${tavilyApiKey}`);
+  }
 }
 
 function buildVolumeMounts(
@@ -245,6 +258,7 @@ async function buildContainerArgs(
       'OneCLI gateway not reachable — container will have no credentials',
     );
   }
+  applyExplicitContainerEnv(args);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
