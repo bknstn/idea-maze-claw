@@ -25,6 +25,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { isIdleMarker } from './container-output.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -301,7 +302,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === 'success') {
+    if (isIdleMarker(result)) {
+      // Only the final null-result success marker means the query loop is now
+      // waiting for follow-up IPC input.
       queue.notifyIdle(chatJid);
     }
 

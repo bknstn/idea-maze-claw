@@ -8,6 +8,7 @@ import {
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { isIdleMarker } from './container-output.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -191,7 +192,7 @@ async function runTask(
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
-        if (streamedOutput.status === 'success') {
+        if (isIdleMarker(streamedOutput)) {
           deps.queue.notifyIdle(task.chat_jid);
           scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
