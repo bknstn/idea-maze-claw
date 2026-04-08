@@ -11,6 +11,8 @@ interface QueuedTask {
   fn: () => Promise<void>;
 }
 
+export type MessageEnqueueResult = 'started' | 'queued' | 'already-queued';
+
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
 
@@ -59,18 +61,20 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
-  enqueueMessageCheck(groupJid: string): void {
-    if (this.shuttingDown) return;
+  enqueueMessageCheck(groupJid: string): MessageEnqueueResult {
+    if (this.shuttingDown) return 'already-queued';
 
     const state = this.getGroup(groupJid);
 
     if (state.active) {
+      const wasQueued = state.pendingMessages;
       state.pendingMessages = true;
       logger.debug({ groupJid }, 'Container active, message queued');
-      return;
+      return wasQueued ? 'already-queued' : 'queued';
     }
 
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+      const wasQueued = state.pendingMessages;
       state.pendingMessages = true;
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
@@ -79,12 +83,13 @@ export class GroupQueue {
         { groupJid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
-      return;
+      return wasQueued ? 'already-queued' : 'queued';
     }
 
     this.runForGroup(groupJid, 'messages').catch((err) =>
       logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
     );
+    return 'started';
   }
 
   enqueueTask(groupJid: string, taskId: string, fn: () => Promise<void>): void {

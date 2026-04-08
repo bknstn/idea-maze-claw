@@ -557,8 +557,15 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+            // No idle follow-up window — enqueue for a new run and acknowledge
+            // only on the first transition into the queued state.
+            const enqueueResult = queue.enqueueMessageCheck(chatJid);
+            if (enqueueResult === 'queued') {
+              await channel.sendMessage(
+                chatJid,
+                'Request received while another run is still active. Queued and will run next.',
+              );
+            }
           }
         }
       }

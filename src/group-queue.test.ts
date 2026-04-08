@@ -432,6 +432,27 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('returns queued only once while messages remain pending', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    expect(queue.enqueueMessageCheck('group1@g.us')).toBe('started');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.enqueueMessageCheck('group1@g.us')).toBe('queued');
+    expect(queue.enqueueMessageCheck('group1@g.us')).toBe('already-queued');
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('sendMessage returns false for task containers so user messages queue up', async () => {
     let resolveTask: () => void;
 
