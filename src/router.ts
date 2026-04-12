@@ -44,9 +44,7 @@ function splitTableCells(line: string): string[] {
 
 function isMarkdownTableSeparator(line: string): boolean {
   const cells = splitTableCells(line);
-  return (
-    cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
-  );
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
 function isMarkdownTableHeader(line: string): boolean {
