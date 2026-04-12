@@ -583,19 +583,14 @@ async function startMessageLoop(): Promise<void> {
               {
                 busyInteractiveContainer:
                   queue.hasBusyInteractiveContainer(chatJid),
-                lastAssistantMessage: getLastBotMessage(
-                  chatJid,
-                  ASSISTANT_NAME,
-                )?.content,
+                lastAssistantMessage: getLastBotMessage(chatJid, ASSISTANT_NAME)
+                  ?.content,
               },
             );
-            const enqueueResult = queue.enqueueIncomingInput(
-              chatJid,
-              {
-                source: classifiedInput.source,
-                kind: classifiedInput.kind,
-              },
-            );
+            const enqueueResult = queue.enqueueIncomingInput(chatJid, {
+              source: classifiedInput.source,
+              kind: classifiedInput.kind,
+            });
             if (enqueueResult === 'queued') {
               await channel.sendMessage(
                 chatJid,

@@ -63,7 +63,8 @@ describe('resolvePendingInput', () => {
             text: JSON.stringify({
               kind: 'workflow_reply',
               confidence: 0.91,
-              reason: 'This is an actionable instruction about the previous answer.',
+              reason:
+                'This is an actionable instruction about the previous answer.',
             }),
           },
         ],

@@ -175,7 +175,10 @@ export function classifyPendingInput(
   messages: NewMessage[],
   assistantName: string,
 ): PendingInput {
-  const { source, kind } = classifyPendingInputDetailed(messages, assistantName);
+  const { source, kind } = classifyPendingInputDetailed(
+    messages,
+    assistantName,
+  );
   return { source, kind };
 }
 

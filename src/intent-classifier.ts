@@ -44,9 +44,7 @@ function getClassifierConfig(): {
   ]);
 
   const provider =
-    process.env.AI_INTENT_CLASSIFIER ||
-    envVars.AI_INTENT_CLASSIFIER ||
-    'auto';
+    process.env.AI_INTENT_CLASSIFIER || envVars.AI_INTENT_CLASSIFIER || 'auto';
   const model =
     process.env.AI_INTENT_CLASSIFIER_MODEL ||
     envVars.AI_INTENT_CLASSIFIER_MODEL ||
@@ -184,7 +182,9 @@ async function classifyWithClaude(
 
     const payload = (await response.json()) as AnthropicResponse;
     const rawText = (payload.content || [])
-      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .filter(
+        (block) => block.type === 'text' && typeof block.text === 'string',
+      )
       .map((block) => block.text)
       .join('\n')
       .trim();
