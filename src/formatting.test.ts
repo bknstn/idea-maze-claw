@@ -283,6 +283,49 @@ describe('formatOutbound', () => {
       formatOutbound('<internal>thinking</internal>The answer is 42'),
     ).toBe('The answer is 42');
   });
+
+  it('converts markdown tables into readable bullet lists', () => {
+    expect(
+      formatOutbound(
+        [
+          '| Component | Status |',
+          '| --- | --- |',
+          '| Scheduled tasks | None configured |',
+          '| Shell execution | Permission error |',
+        ].join('\n'),
+      ),
+    ).toBe(
+      [
+        '- Scheduled tasks: None configured',
+        '- Shell execution: Permission error',
+      ].join('\n'),
+    );
+  });
+
+  it('converts multi-column tables into labeled bullet rows', () => {
+    expect(
+      formatOutbound(
+        [
+          '| Run | Opportunity | Thesis Preview |',
+          '| --- | --- | --- |',
+          '| #9 | Users Span | Non-technical users struggle with setup |',
+        ].join('\n'),
+      ),
+    ).toBe(
+      '- Run: #9; Opportunity: Users Span; Thesis Preview: Non-technical users struggle with setup',
+    );
+  });
+
+  it('does not rewrite table-like text inside fenced code blocks', () => {
+    const codeBlock = [
+      '```md',
+      '| Component | Status |',
+      '| --- | --- |',
+      '| Scheduled tasks | None configured |',
+      '```',
+    ].join('\n');
+    expect(formatOutbound(codeBlock)).toBe(codeBlock);
+  });
 });
 
 // --- Trigger gating with requiresTrigger flag ---

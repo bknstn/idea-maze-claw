@@ -35,8 +35,98 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+function splitTableCells(line: string): string[] {
+  let trimmed = line.trim();
+  if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+  if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+  return trimmed.split('|').map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = splitTableCells(line);
+  return (
+    cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+  );
+}
+
+function isMarkdownTableHeader(line: string): boolean {
+  const cells = splitTableCells(line);
+  return cells.length >= 2 && cells.some((cell) => cell.length > 0);
+}
+
+function isMarkdownTableRow(line: string): boolean {
+  const cells = splitTableCells(line);
+  return line.includes('|') && cells.length >= 2;
+}
+
+function formatTableRow(headers: string[], row: string[]): string {
+  const cells = headers
+    .map((header, index) => ({
+      header,
+      value: row[index]?.trim() ?? '',
+    }))
+    .filter((cell) => cell.value.length > 0);
+
+  if (cells.length === 0) return '';
+
+  if (cells.length === 2 && row[0]?.trim()) {
+    return `- ${row[0].trim()}: ${row[1]?.trim() ?? ''}`.trimEnd();
+  }
+
+  return `- ${cells.map((cell) => `${cell.header}: ${cell.value}`).join('; ')}`;
+}
+
+function normalizeMarkdownTables(text: string): string {
+  const fencedCodeBlock = /```[\s\S]*?```/g;
+  let result = '';
+  let lastIndex = 0;
+
+  const transformSegment = (segment: string): string => {
+    const lines = segment.split('\n');
+    const output: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      if (
+        i + 1 < lines.length &&
+        isMarkdownTableHeader(lines[i]) &&
+        isMarkdownTableSeparator(lines[i + 1])
+      ) {
+        const headers = splitTableCells(lines[i]);
+        const rows: string[] = [];
+        let j = i + 2;
+
+        while (j < lines.length && isMarkdownTableRow(lines[j])) {
+          const formatted = formatTableRow(headers, splitTableCells(lines[j]));
+          if (formatted) rows.push(formatted);
+          j++;
+        }
+
+        if (rows.length > 0) {
+          output.push(...rows);
+          i = j - 1;
+          continue;
+        }
+      }
+
+      output.push(lines[i]);
+    }
+
+    return output.join('\n');
+  };
+
+  for (const match of text.matchAll(fencedCodeBlock)) {
+    const index = match.index ?? 0;
+    result += transformSegment(text.slice(lastIndex, index));
+    result += match[0];
+    lastIndex = index + match[0].length;
+  }
+
+  result += transformSegment(text.slice(lastIndex));
+  return result;
+}
+
 export function formatOutbound(rawText: string): string {
-  const text = stripInternalTags(rawText);
+  const text = normalizeMarkdownTables(stripInternalTags(rawText));
   if (!text) return '';
   return text;
 }

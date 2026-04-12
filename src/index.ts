@@ -292,8 +292,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const text = formatOutbound(raw);
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
@@ -755,7 +754,10 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      const formatted = formatOutbound(text);
+      return formatted
+        ? channel.sendMessage(jid, formatted)
+        : Promise.resolve();
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
