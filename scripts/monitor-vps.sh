@@ -5,8 +5,9 @@
 # Usage:
 #   ./scripts/monitor-vps.sh
 #   ./scripts/monitor-vps.sh idea-maze-vps
+#   ./scripts/monitor-vps.sh --logs
 #   ./scripts/monitor-vps.sh --follow
-#   ./scripts/monitor-vps.sh idea-maze-vps --follow
+#   ./scripts/monitor-vps.sh idea-maze-vps --logs --follow
 
 set -euo pipefail
 
@@ -14,16 +15,18 @@ HOST_ALIAS="idea-maze-vps"
 APP_DIR="/root/idea-maze-claw"
 SERVICE_NAME="nanoclaw"
 FOLLOW="false"
+SHOW_LOGS="false"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/monitor-vps.sh [ssh-host-alias] [--follow]
+Usage: ./scripts/monitor-vps.sh [ssh-host-alias] [--logs] [--follow]
 
 Defaults:
   ssh-host-alias: idea-maze-vps
   mode:           one-shot summary
 
 Options:
+  -l, --logs      Include recent app and error logs (may contain sensitive data)
   -f, --follow    Follow NanoClaw service logs after printing the summary
   -h, --help      Show this help text
 EOF
@@ -31,6 +34,9 @@ EOF
 
 for arg in "$@"; do
   case "$arg" in
+    -l|--logs)
+      SHOW_LOGS="true"
+      ;;
     -f|--follow)
       FOLLOW="true"
       ;;
@@ -50,12 +56,13 @@ for arg in "$@"; do
   esac
 done
 
-ssh "$HOST_ALIAS" bash -s -- "$APP_DIR" "$SERVICE_NAME" "$FOLLOW" <<'REMOTE'
+ssh "$HOST_ALIAS" bash -s -- "$APP_DIR" "$SERVICE_NAME" "$FOLLOW" "$SHOW_LOGS" <<'REMOTE'
 set -u
 
 APP_DIR="$1"
 SERVICE_NAME="$2"
 FOLLOW="$3"
+SHOW_LOGS="$4"
 
 section() {
   printf '\n== %s ==\n' "$1"
@@ -144,11 +151,16 @@ console.log(JSON.stringify(runs, null, 2));
 db.close();
 NODE
 
-section "Recent App Logs"
-tail -n 20 "$APP_DIR/logs/nanoclaw.log" 2>/dev/null || true
+if [ "$SHOW_LOGS" = "true" ]; then
+  section "Recent App Logs"
+  tail -n 20 "$APP_DIR/logs/nanoclaw.log" 2>/dev/null || true
 
-section "Recent Error Logs"
-tail -n 20 "$APP_DIR/logs/nanoclaw.error.log" 2>/dev/null || true
+  section "Recent Error Logs"
+  tail -n 20 "$APP_DIR/logs/nanoclaw.error.log" 2>/dev/null || true
+else
+  section "Recent Logs"
+  echo "Omitted by default. Re-run with --logs to include recent app/error logs."
+fi
 
 if [ "$FOLLOW" = "true" ]; then
   section "Following Service Logs"

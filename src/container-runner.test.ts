@@ -117,6 +117,7 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { logger } from './logger.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -145,6 +146,7 @@ describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -261,6 +263,62 @@ describe('container-runner timeout behavior', () => {
 
     expect(containerArgs).toContain('-e');
     expect(containerArgs).toContain('TAVILY_API_KEY=tvly-test-key');
+  });
+
+  it('redacts env values from logged container args', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+      newSessionId: 'session-redacted-logs',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const debugCalls = vi
+      .mocked(logger.debug)
+      .mock.calls.filter((call) => call[1] === 'Container mount configuration');
+    const payload = debugCalls.at(-1)?.[0] as
+      | { containerArgs?: string }
+      | undefined;
+
+    expect(payload?.containerArgs).toContain('TAVILY_API_KEY=<redacted>');
+    expect(payload?.containerArgs).not.toContain('tvly-test-key');
+  });
+
+  it('redacts env values in container log files', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    fakeProc.stderr.push('fatal');
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 1);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const logWrite = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find(
+        (call) =>
+          typeof call[0] === 'string' && call[0].includes('container-'),
+      );
+    const content = String(logWrite?.[1] ?? '');
+
+    expect(content).toContain('=== Container Args (REDACTED) ===');
+    expect(content).toContain('TAVILY_API_KEY=<redacted>');
+    expect(content).not.toContain('tvly-test-key');
   });
 
   it('re-owns writable mounts for the node user on root-owned hosts', async () => {

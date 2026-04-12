@@ -61,6 +61,38 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+function redactEnvAssignment(assignment: string): string {
+  const eqIndex = assignment.indexOf('=');
+  if (eqIndex === -1) return assignment;
+  return `${assignment.slice(0, eqIndex)}=<redacted>`;
+}
+
+function redactLoggedContainerArgs(args: string[]): string[] {
+  const redacted: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-e' || arg === '--env') {
+      redacted.push(arg);
+      const nextArg = args[i + 1];
+      if (nextArg !== undefined) {
+        redacted.push(redactEnvAssignment(nextArg));
+        i++;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--env=')) {
+      redacted.push(`--env=${redactEnvAssignment(arg.slice('--env='.length))}`);
+      continue;
+    }
+
+    redacted.push(arg);
+  }
+
+  return redacted;
+}
+
 function applyExplicitContainerEnv(args: string[]): void {
   // Tavily search currently authenticates with a request-body key in the
   // Idea Maze worker, so OneCLI's generic header injection cannot satisfy it.
@@ -340,6 +372,7 @@ export async function runContainerAgent(
     containerName,
     agentIdentifier,
   );
+  const loggedContainerArgs = redactLoggedContainerArgs(containerArgs);
 
   logger.debug(
     {
@@ -349,7 +382,7 @@ export async function runContainerAgent(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
-      containerArgs: containerArgs.join(' '),
+      containerArgs: loggedContainerArgs.join(' '),
     },
     'Container mount configuration',
   );
@@ -578,8 +611,8 @@ export async function runContainerAgent(
           );
         }
         logLines.push(
-          `=== Container Args ===`,
-          containerArgs.join(' '),
+          `=== Container Args (REDACTED) ===`,
+          loggedContainerArgs.join(' '),
           ``,
           `=== Mounts ===`,
           mounts
