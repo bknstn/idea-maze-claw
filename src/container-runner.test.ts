@@ -311,8 +311,7 @@ describe('container-runner timeout behavior', () => {
     const logWrite = vi
       .mocked(fs.writeFileSync)
       .mock.calls.find(
-        (call) =>
-          typeof call[0] === 'string' && call[0].includes('container-'),
+        (call) => typeof call[0] === 'string' && call[0].includes('container-'),
       );
     const content = String(logWrite?.[1] ?? '');
 
