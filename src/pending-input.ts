@@ -87,7 +87,10 @@ function classifyMessageKind(
     return 'workflow_reply';
   }
 
-  if (isReplyToAssistant(message, assistantName) && text.split(/\s+/).length >= 2) {
+  if (
+    isReplyToAssistant(message, assistantName) &&
+    text.split(/\s+/).length >= 2
+  ) {
     return 'workflow_reply';
   }
 
