@@ -309,7 +309,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      const text = formatOutbound(raw);
+      const text = formatOutbound(raw, channel.name);
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
@@ -774,7 +774,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
         return;
       }
-      const text = formatOutbound(rawText);
+      const text = formatOutbound(rawText, channel.name);
       if (text) await channel.sendMessage(jid, text);
     },
   });
@@ -782,7 +782,7 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      const formatted = formatOutbound(text);
+      const formatted = formatOutbound(text, channel.name);
       return formatted
         ? channel.sendMessage(jid, formatted)
         : Promise.resolve();

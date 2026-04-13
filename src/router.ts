@@ -1,4 +1,5 @@
 import { Channel, NewMessage } from './types.js';
+import { parseTextStyles } from './text-styles.js';
 import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
@@ -123,8 +124,11 @@ function normalizeMarkdownTables(text: string): string {
   return result;
 }
 
-export function formatOutbound(rawText: string): string {
-  const text = normalizeMarkdownTables(stripInternalTags(rawText));
+export function formatOutbound(rawText: string, channel?: string): string {
+  const text = parseTextStyles(
+    normalizeMarkdownTables(stripInternalTags(rawText)),
+    channel,
+  );
   if (!text) return '';
   return text;
 }

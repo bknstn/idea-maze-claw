@@ -326,6 +326,36 @@ describe('formatOutbound', () => {
     ].join('\n');
     expect(formatOutbound(codeBlock)).toBe(codeBlock);
   });
+
+  it('converts Telegram markdown into Telegram-safe markers', () => {
+    expect(
+      formatOutbound('## Summary\n**Bold** and *italic*', 'telegram'),
+    ).toBe('*Summary*\n*Bold* and _italic_');
+  });
+
+  it('flattens Telegram markdown links', () => {
+    expect(
+      formatOutbound('[Repository](https://github.com/example/repo)', 'telegram'),
+    ).toBe('Repository: https://github.com/example/repo');
+  });
+
+  it('preserves inline code and fenced code for Telegram', () => {
+    const text = [
+      'Use `**literal**` and **real** output.',
+      '```md',
+      '**keep this**',
+      '```',
+    ].join('\n');
+
+    expect(formatOutbound(text, 'telegram')).toBe(
+      [
+        'Use `**literal**` and *real* output.',
+        '```md',
+        '**keep this**',
+        '```',
+      ].join('\n'),
+    );
+  });
 });
 
 // --- Trigger gating with requiresTrigger flag ---
