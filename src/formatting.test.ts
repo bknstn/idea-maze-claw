@@ -335,7 +335,10 @@ describe('formatOutbound', () => {
 
   it('flattens Telegram markdown links', () => {
     expect(
-      formatOutbound('[Repository](https://github.com/example/repo)', 'telegram'),
+      formatOutbound(
+        '[Repository](https://github.com/example/repo)',
+        'telegram',
+      ),
     ).toBe('Repository: https://github.com/example/repo');
   });
 

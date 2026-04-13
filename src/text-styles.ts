@@ -1,8 +1,4 @@
-const CHANNELS_WITH_NATIVE_MARKERS = new Set([
-  'telegram',
-  'whatsapp',
-  'slack',
-]);
+const CHANNELS_WITH_NATIVE_MARKERS = new Set(['telegram', 'whatsapp', 'slack']);
 
 function protectCodeSegments(text: string): {
   text: string;
@@ -40,10 +36,7 @@ function flattenMarkdownLinks(text: string, channel: string): string {
 }
 
 function convertSingleAsteriskItalic(text: string): string {
-  return text.replace(
-    /(?<!\*)\*(?![\s*])([^*\n]+?)(?<!\s)\*(?!\*)/g,
-    '_$1_',
-  );
+  return text.replace(/(?<!\*)\*(?![\s*])([^*\n]+?)(?<!\s)\*(?!\*)/g, '_$1_');
 }
 
 function convertDoubleAsteriskBold(text: string): string {
