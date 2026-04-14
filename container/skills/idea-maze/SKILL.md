@@ -1,6 +1,6 @@
 ---
 name: idea-maze
-description: Run Idea Maze research pipeline — harvest Reddit signals, extract insights, cluster opportunities, draft research. Use when the user mentions harvesting, ingesting, insights, opportunities, research pipeline, or scoring.
+description: Run Idea Maze research pipeline — harvest Reddit signals, extract insights, cluster opportunities, and route research by score. Use when the user mentions harvesting, ingesting, insights, opportunities, research pipeline, or scoring.
 ---
 
 # Idea Maze Research Pipeline
@@ -28,7 +28,8 @@ cd /workspace/group/scripts && tsx <script>.ts [args]
 - `refresh-opportunities.ts` — Cluster insights into opportunities by keyword
 
 ### Research
-- `research-opportunity.ts <slug>` — Draft research for an opportunity (lands in review_gate)
+- `research-opportunity.ts <slug>` — Draft research for an opportunity (manual runs land in `review_gate`)
+- `process-opportunities.ts` — Route scored opportunities: `9-10` auto-approve, `7-8` queue for manual review, `<=6` ignore
 
 ### Review Gate
 - `approve-run.ts <run_id> [notes]` — Approve a run, write Markdown artifact
@@ -49,7 +50,7 @@ This lets the user know the request was received while the work runs.
 1. **Harvest** — Ingest from Reddit → `source_items` with harvest scores
 2. **Insights** — Extract typed signals: pain_point, demand_signal, workflow_gap, distribution_clue, willingness_to_pay, competitor_move, implementation_constraint
 3. **Opportunities** — Cluster insights by keyword, score by evidence + diversity
-4. **Research** — Draft thesis, evidence, MVP scope, risks → lands in `review_gate`
+4. **Research Routing** — Draft thesis, evidence, MVP scope, risks; `9-10` auto-approve, `7-8` land in `review_gate`, `<=6` ignored
 5. **Artifacts** — On approval, render Markdown to `data/artifacts/`
 
 ## Data Locations
@@ -97,7 +98,7 @@ Set up recurring jobs using `mcp__nanoclaw__schedule_task`. All tasks target the
 
 ### Recommended schedule
 
-**Full pipeline** (Reddit ingest + insights + opportunities) — every 60 minutes:
+**Full pipeline** (Reddit ingest + insights + opportunities + research routing) — every 60 minutes:
 ```
 prompt: "Run the active Idea Maze pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report a concise results summary."
 schedule_type: interval
@@ -146,3 +147,4 @@ Pipeline settings are stored in the `app_state` table:
 | `reddit_subreddits` | `["SaaS","startups","webdev"]` | Subreddits to harvest |
 | `gmail_query` | `newer_than:1d -category:promotions` | Gmail search filter |
 | `telegram_channels` | `["channel_username"]` | Telegram channels to follow |
+| `opportunity score policy` | `9-10 auto`, `7-8 manual`, `<=6 ignore` | Built-in research routing thresholds |

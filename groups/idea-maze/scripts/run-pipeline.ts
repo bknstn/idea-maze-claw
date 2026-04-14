@@ -1,7 +1,7 @@
 /**
  * Run the full harvest pipeline with run-lock protection.
  *
- * Stages: ingest-reddit → extract-insights → refresh-opportunities
+ * Stages: ingest-reddit → extract-insights → refresh-opportunities → process-opportunities
  *
  * Used by scheduled tasks to run the pipeline safely without overlap.
  * Skips stages that fail and reports results.
@@ -59,6 +59,7 @@ function main() {
     // Analysis
     results.push(runStage("extract-insights", "extract-insights.ts"));
     results.push(runStage("refresh-opportunities", "refresh-opportunities.ts"));
+    results.push(runStage("process-opportunities", "process-opportunities.ts"));
   } finally {
     releaseRunLock("pipeline");
   }

@@ -5,6 +5,7 @@
  */
 
 import { getDb, closeDb } from "./lib/db.ts";
+import { rejectResearchRun } from "./lib/review.ts";
 import { initSchema } from "./lib/schema.ts";
 
 function main() {
@@ -19,31 +20,16 @@ function main() {
 
   const db = getDb();
   initSchema(db);
-
-  const run = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as any;
-  if (!run) {
-    console.error(`Run #${runId} not found.`);
-    process.exit(1);
+  try {
+    rejectResearchRun(db, runId, notes);
+    console.log(`Run #${runId} rejected.`);
+    if (notes) console.log(`Notes: ${notes}`);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  } finally {
+    closeDb();
   }
-  if (run.status !== "review_gate") {
-    console.error(`Run #${runId} is not in review_gate (status: ${run.status}).`);
-    process.exit(1);
-  }
-
-  const now = new Date().toISOString();
-
-  // Create rejection record
-  db.prepare(
-    "INSERT INTO approvals (run_id, decision, notes, decided_at_utc) VALUES (?, 'rejected', ?, ?)",
-  ).run(runId, notes, now);
-
-  // Update run status
-  db.prepare("UPDATE runs SET status = 'rejected', completed_at_utc = ? WHERE id = ?").run(now, runId);
-
-  console.log(`Run #${runId} rejected.`);
-  if (notes) console.log(`Notes: ${notes}`);
-
-  closeDb();
 }
 
 main();

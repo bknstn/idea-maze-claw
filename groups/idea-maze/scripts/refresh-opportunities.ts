@@ -8,7 +8,8 @@
  * Usage: tsx refresh-opportunities.ts
  */
 
-import { getDb, closeDb } from "./lib/db.ts";
+import { closeDb, getDb } from "./lib/db.ts";
+import { classifyOpportunityScore } from "./lib/opportunity-policy.ts";
 import { initSchema } from "./lib/schema.ts";
 
 // --- Helpers ---
@@ -122,6 +123,7 @@ function main() {
       title = excluded.title,
       thesis = excluded.thesis,
       score = excluded.score,
+      status = excluded.status,
       cluster_key = excluded.cluster_key,
       metadata_json = excluded.metadata_json,
       updated_at_utc = excluded.updated_at_utc
@@ -133,8 +135,22 @@ function main() {
   `);
 
   const getOppId = db.prepare("SELECT id FROM opportunities WHERE slug = ?");
+  const getExistingOpp = db.prepare("SELECT id FROM opportunities WHERE slug = ?");
+  const deleteOpp = db.prepare("DELETE FROM opportunities WHERE id = ?");
+  const deleteRunsForOpp = db.prepare("DELETE FROM runs WHERE target_id = ?");
+  const hasApprovedArtifact = db.prepare("SELECT 1 FROM artifacts WHERE opportunity_id = ? LIMIT 1");
+  const hasApprovedRun = db.prepare("SELECT 1 FROM runs WHERE target_id = ? AND status = 'approved' LIMIT 1");
+  const hasRunningRun = db.prepare("SELECT 1 FROM runs WHERE target_id = ? AND status = 'running' LIMIT 1");
+  const updateRetainedLowScoreOpp = db.prepare(`
+    UPDATE opportunities
+    SET title = ?, thesis = ?, score = ?, status = ?, cluster_key = ?, metadata_json = ?, updated_at_utc = ?
+    WHERE id = ?
+  `);
 
   let created = 0;
+  let ignored = 0;
+  let deleted = 0;
+  let retained = 0;
 
   // Filter out small / single-type clusters
   const MIN_INSIGHTS = 3;
@@ -174,6 +190,7 @@ function main() {
     const score = Math.round(
       Math.min(10.0, weightedEvidence + avgSourceScore * 2.5 + uniqueSources * 0.4 + ranked.length * 0.2) * 100,
     ) / 100;
+    const policy = classifyOpportunityScore(score);
 
     // Collect pattern/signal counts
     const patternCounts = new Map<string, number>();
@@ -186,6 +203,7 @@ function main() {
       } catch { /* skip */ }
     }
 
+    const existing = getExistingOpp.get(slug) as { id: number } | undefined;
     const metadata = {
       insight_count: ranked.length,
       source_count: uniqueSources,
@@ -193,7 +211,45 @@ function main() {
       average_harvest_score: Math.round(avgSourceScore * 1000) / 1000,
       top_source_patterns: [...patternCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n),
       top_harvest_signals: [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n]) => n),
+      score_bucket: policy.bucket,
+      review_disposition: policy.disposition,
     };
+
+    if (policy.disposition === "ignore") {
+      ignored++;
+      if (!existing) {
+        console.log(`  ${slug}: score=${score}, ignored (score bucket ${policy.bucket}).`);
+        continue;
+      }
+
+      const targetId = String(existing.id);
+      const keepForApprovedHistory = Boolean(hasApprovedArtifact.get(existing.id) || hasApprovedRun.get(targetId));
+      const keepForActiveRun = Boolean(hasRunningRun.get(targetId));
+
+      if (!keepForApprovedHistory && !keepForActiveRun) {
+        deleteRunsForOpp.run(targetId);
+        deleteOpp.run(existing.id);
+        deleted++;
+        console.log(`  ${slug}: score=${score}, ignored and deleted existing low-score opportunity.`);
+        continue;
+      }
+
+      updateRetainedLowScoreOpp.run(
+        title,
+        thesis,
+        score,
+        keepForApprovedHistory ? "archived" : "active",
+        clusterKey,
+        JSON.stringify(metadata),
+        now,
+        existing.id,
+      );
+      retained++;
+      console.log(
+        `  ${slug}: score=${score}, ignored but retained due to ${keepForApprovedHistory ? "approved history" : "an active run"}.`,
+      );
+      continue;
+    }
 
     upsertOpp.run(slug, title, thesis, score, clusterKey, JSON.stringify(metadata), now, now);
 
@@ -213,7 +269,9 @@ function main() {
     created++;
   }
 
-  console.log(`\nDone. ${created} opportunities created/updated.`);
+  console.log(
+    `\nDone. ${created} opportunities created/updated, ${ignored} ignored, ${deleted} deleted, ${retained} retained as history.`,
+  );
   closeDb();
 }
 
