@@ -24,12 +24,15 @@ interface StageResult {
   durationMs: number;
 }
 
-function runStage(name: string, script: string): StageResult {
+const DEFAULT_STAGE_TIMEOUT_MS = 5 * 60 * 1000;
+const PROCESS_OPPORTUNITIES_TIMEOUT_MS = 15 * 60 * 1000;
+
+function runStage(name: string, script: string, timeoutMs = DEFAULT_STAGE_TIMEOUT_MS): StageResult {
   const start = Date.now();
   try {
     const output = execSync(`cd "${SCRIPTS_DIR}" && tsx ${script}`, {
       encoding: "utf-8",
-      timeout: 5 * 60 * 1000, // 5 min per stage
+      timeout: timeoutMs,
       env: process.env,
     });
     return { stage: name, ok: true, output: output.trim(), durationMs: Date.now() - start };
@@ -59,7 +62,13 @@ function main() {
     // Analysis
     results.push(runStage("extract-insights", "extract-insights.ts"));
     results.push(runStage("refresh-opportunities", "refresh-opportunities.ts"));
-    results.push(runStage("process-opportunities", "process-opportunities.ts"));
+    results.push(
+      runStage(
+        "process-opportunities",
+        "process-opportunities.ts",
+        PROCESS_OPPORTUNITIES_TIMEOUT_MS,
+      ),
+    );
   } finally {
     releaseRunLock("pipeline");
   }

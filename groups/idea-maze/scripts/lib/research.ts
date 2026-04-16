@@ -117,8 +117,38 @@ export async function researchOpportunity(
   const logger = options.logger ?? console;
   const approvalMode = options.approvalMode ?? "review_gate";
   const requestedBy = options.requestedBy ?? "user";
+  let runId: number | null = null;
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
 
   initSchema(db);
+
+  const markRunFailed = (reason: string): void => {
+    if (runId === null) return;
+    db.prepare(`
+      UPDATE runs
+      SET status = 'error', completed_at_utc = ?, error = ?
+      WHERE id = ? AND status IN ('running', 'review_gate')
+    `).run(new Date().toISOString(), reason, runId);
+  };
+
+  const installSignalHandler = (signal: NodeJS.Signals, exitCode: number): void => {
+    const handler = () => {
+      try {
+        markRunFailed(`Interrupted by ${signal}`);
+      } finally {
+        process.exit(exitCode);
+      }
+    };
+    signalHandlers.set(signal, handler);
+    process.once(signal, handler);
+  };
+
+  const removeSignalHandlers = (): void => {
+    for (const [signal, handler] of signalHandlers) {
+      process.off(signal, handler);
+    }
+    signalHandlers.clear();
+  };
 
   try {
     let opp = db.prepare("SELECT * FROM opportunities WHERE slug = ?").get(target) as any;
@@ -143,8 +173,10 @@ export async function researchOpportunity(
       INSERT INTO runs (run_type, target_type, target_id, status, requested_by, started_at_utc, metadata_json)
       VALUES ('research', 'opportunity', ?, 'running', ?, ?, '{}')
     `).run(String(opp.id), requestedBy, now);
-    const runId = Number(runResult.lastInsertRowid);
+    runId = Number(runResult.lastInsertRowid);
     logger.log(`Created run #${runId}`);
+    installSignalHandler("SIGINT", 130);
+    installSignalHandler("SIGTERM", 143);
 
     const sourceItems = db.prepare(`
       SELECT si.* FROM source_items si
@@ -251,7 +283,13 @@ export async function researchOpportunity(
       runId,
       status: "review_gate",
     };
+  } catch (err) {
+    if (runId !== null) {
+      markRunFailed(err instanceof Error ? err.message : String(err));
+    }
+    throw err;
   } finally {
+    removeSignalHandlers();
     if (ownsDb) {
       closeDb();
     }

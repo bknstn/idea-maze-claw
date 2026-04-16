@@ -8,29 +8,58 @@
 const API_URL = "https://api.anthropic.com/v1/messages";
 const EXTRACTION_MODEL = "claude-haiku-4-5-20251001"; // fast + cheap for bulk extraction
 const RESEARCH_MODEL = "claude-sonnet-4-6"; // full reasoning for research drafts
+const RESEARCH_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 
 export function isLlmConfigured(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-async function callApi<T>(model: string, systemPrompt: string, userPrompt: string, maxTokens = 4096): Promise<T> {
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+async function callApi<T>(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens = 4096,
+  timeoutMs?: number,
+): Promise<T> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-    }),
-  });
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  let res: Response;
+  try {
+    res = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+      signal: controller?.signal,
+    });
+  } catch (err) {
+    if (timeoutMs && isAbortError(err)) {
+      throw new Error(`Anthropic API request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 
   if (!res.ok) {
     const body = await res.text();
@@ -61,7 +90,13 @@ export async function generateResearchJson<T>(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<T> {
-  return callApi<T>(RESEARCH_MODEL, systemPrompt, userPrompt, 8192);
+  return callApi<T>(
+    RESEARCH_MODEL,
+    systemPrompt,
+    userPrompt,
+    8192,
+    RESEARCH_REQUEST_TIMEOUT_MS,
+  );
 }
 
 /** Batch extraction: sends up to BATCH_SIZE items in one Haiku call */

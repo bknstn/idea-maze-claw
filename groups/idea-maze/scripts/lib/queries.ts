@@ -199,7 +199,7 @@ export function getCounts(): {
     source_items: (db.prepare("SELECT COUNT(*) as n FROM source_items").get() as any).n,
     insights: (db.prepare("SELECT COUNT(*) as n FROM insights").get() as any).n,
     opportunities: (db.prepare("SELECT COUNT(*) as n FROM opportunities").get() as any).n,
-    runs_pending: (db.prepare("SELECT COUNT(*) as n FROM runs WHERE status = 'review_gate'").get() as any).n,
+    runs_pending: (db.prepare("SELECT COUNT(*) as n FROM runs WHERE status IN ('review_gate', 'running')").get() as any).n,
     artifacts: (db.prepare("SELECT COUNT(*) as n FROM artifacts").get() as any).n,
   };
 }
