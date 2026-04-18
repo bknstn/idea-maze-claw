@@ -61,6 +61,7 @@ import {
   stopRemoteControl,
 } from './remote-control.js';
 import {
+  isPrivilegedSenderAllowed,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -675,6 +676,23 @@ async function main(): Promise<void> {
 
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
+
+    const allowlistCfg = loadSenderAllowlist();
+    if (
+      !isPrivilegedSenderAllowed(
+        chatJid,
+        msg.sender,
+        allowlistCfg,
+        msg.is_from_me === true,
+      )
+    ) {
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        'Remote control rejected: sender not authorized',
+      );
+      await channel.sendMessage(chatJid, 'Remote control rejected: sender not authorized.');
+      return;
+    }
 
     if (command === '/remote-control') {
       const result = await startRemoteControl(

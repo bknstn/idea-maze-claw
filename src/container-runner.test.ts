@@ -127,10 +127,24 @@ const testGroup: RegisteredGroup = {
   added_at: new Date().toISOString(),
 };
 
+const ideaMazeGroup: RegisteredGroup = {
+  name: 'Idea Maze',
+  folder: 'idea-maze',
+  trigger: '@Andy',
+  added_at: new Date().toISOString(),
+};
+
 const testInput = {
   prompt: 'Hello',
   groupFolder: 'test-group',
   chatJid: 'test@g.us',
+  isMain: false,
+};
+
+const ideaMazeInput = {
+  prompt: 'Research opportunity',
+  groupFolder: 'idea-maze',
+  chatJid: 'idea-maze@g.us',
   isMain: false,
 };
 
@@ -240,10 +254,10 @@ describe('container-runner timeout behavior', () => {
     expect(result.newSessionId).toBe('session-456');
   });
 
-  it('passes through TAVILY_API_KEY to the container', async () => {
+  it('passes through TAVILY_API_KEY to the Idea Maze container only', async () => {
     const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
+      ideaMazeGroup,
+      ideaMazeInput,
       () => {},
       async () => {},
     );
@@ -265,10 +279,34 @@ describe('container-runner timeout behavior', () => {
     expect(containerArgs).toContain('TAVILY_API_KEY=tvly-test-key');
   });
 
-  it('redacts env values from logged container args', async () => {
+  it('does not pass TAVILY_API_KEY to non-Idea Maze containers', async () => {
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+      newSessionId: 'session-no-tavily',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnMock = vi.mocked(spawn);
+    const containerArgs = spawnMock.mock.calls.at(-1)?.[1] ?? [];
+
+    expect(containerArgs).not.toContain('TAVILY_API_KEY=tvly-test-key');
+  });
+
+  it('redacts env values from logged container args', async () => {
+    const resultPromise = runContainerAgent(
+      ideaMazeGroup,
+      ideaMazeInput,
       () => {},
       async () => {},
     );
@@ -296,8 +334,8 @@ describe('container-runner timeout behavior', () => {
 
   it('redacts env values in container log files', async () => {
     const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
+      ideaMazeGroup,
+      ideaMazeInput,
       () => {},
       async () => {},
     );

@@ -4,6 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  isPrivilegedSenderAllowed,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -212,5 +213,46 @@ describe('isTriggerAllowed', () => {
     };
     isTriggerAllowed('g1', 'eve', cfg);
     // Logger.debug is called — we just verify no crash; logger is a real pino instance
+  });
+});
+
+describe('isPrivilegedSenderAllowed', () => {
+  it('allows the bot owner when the message is from self', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    };
+    expect(isPrivilegedSenderAllowed('main', 'anyone', cfg, true)).toBe(true);
+  });
+
+  it('allows Telegram private self-chat sender without an explicit allowlist', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    };
+    expect(isPrivilegedSenderAllowed('tg:12345', '12345', cfg)).toBe(true);
+  });
+
+  it('denies privileged actions for wildcard group chats', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    };
+    expect(isPrivilegedSenderAllowed('tg:-100200300', '12345', cfg)).toBe(
+      false,
+    );
+  });
+
+  it('allows explicitly allowlisted senders for privileged actions', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: [], mode: 'trigger' },
+      chats: { main: { allow: ['alice'], mode: 'trigger' } },
+      logDenied: true,
+    };
+    expect(isPrivilegedSenderAllowed('main', 'alice', cfg)).toBe(true);
+    expect(isPrivilegedSenderAllowed('main', 'eve', cfg)).toBe(false);
   });
 });

@@ -93,7 +93,12 @@ function redactLoggedContainerArgs(args: string[]): string[] {
   return redacted;
 }
 
-function applyExplicitContainerEnv(args: string[]): void {
+function applyExplicitContainerEnv(
+  args: string[],
+  group: Pick<RegisteredGroup, 'folder'>,
+): void {
+  if (group.folder !== 'idea-maze') return;
+
   // Tavily search currently authenticates with a request-body key in the
   // Idea Maze worker, so OneCLI's generic header injection cannot satisfy it.
   // Keep the raw key exposure as narrow as possible and pass through only this
@@ -300,6 +305,7 @@ function buildVolumeMounts(
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  group: Pick<RegisteredGroup, 'folder'>,
   agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
@@ -321,7 +327,7 @@ async function buildContainerArgs(
       'OneCLI gateway not reachable — container will have no credentials',
     );
   }
-  applyExplicitContainerEnv(args);
+  applyExplicitContainerEnv(args, group);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
@@ -370,6 +376,7 @@ export async function runContainerAgent(
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
+    group,
     agentIdentifier,
   );
   const loggedContainerArgs = redactLoggedContainerArgs(containerArgs);

@@ -95,6 +95,10 @@ function getEntry(
   return cfg.chats[chatJid] ?? cfg.default;
 }
 
+function isDirectChatOwner(chatJid: string, sender: string): boolean {
+  return chatJid === sender || chatJid === `tg:${sender}`;
+}
+
 export function isSenderAllowed(
   chatJid: string,
   sender: string,
@@ -125,4 +129,18 @@ export function isTriggerAllowed(
     );
   }
   return allowed;
+}
+
+export function isPrivilegedSenderAllowed(
+  chatJid: string,
+  sender: string,
+  cfg: SenderAllowlistConfig,
+  isFromMe = false,
+): boolean {
+  if (isFromMe) return true;
+  if (isDirectChatOwner(chatJid, sender)) return true;
+
+  const entry = getEntry(chatJid, cfg);
+  if (entry.allow === '*') return false;
+  return entry.allow.includes(sender);
 }

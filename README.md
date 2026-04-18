@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  NanoClaw fork with an Idea Maze product discovery pipeline. Harvests signals from Gmail, Reddit, and Telegram channels → extracts insights → clusters opportunities → drafts research with human approval gating.
+  NanoClaw fork with an Idea Maze product discovery pipeline. Currently harvests Reddit signals → extracts insights → clusters opportunities → drafts research with review or auto-approval based on score.
 </p>
 
 <p align="center">
@@ -89,30 +89,31 @@ GitHub CI also runs on pull requests and on every push to `main`, so trunk pushe
 
 ## Idea Maze Pipeline
 
-The `groups/idea-maze/` workspace runs a five-stage product discovery pipeline:
+The `groups/idea-maze/` workspace runs a Reddit-first product discovery pipeline:
 
 | Stage | Script | Output |
 |-------|--------|--------|
 | **Harvest** | `ingest-reddit.ts` | `source_items` with harvest scores |
 | **Insights** | `extract-insights.ts` | Typed signals: pain points, demand signals, workflow gaps, etc. |
 | **Opportunities** | `refresh-opportunities.ts` | Clustered opportunities scored by evidence and diversity |
-| **Research** | `research-opportunity.ts <slug>` | Draft thesis with optional web enrichment → lands in `review_gate` |
+| **Processing** | `process-opportunities.ts` | Starts bounded research runs, auto-approves score `9-10`, queues score `7-8` in `review_gate` |
+| **Research (on demand)** | `research-opportunity.ts <slug>` | Draft thesis with optional web enrichment → lands in `review_gate` |
 | **Artifacts** | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` |
 
-Pipeline state lives in `groups/idea-maze/data/lab.db` (separate from NanoClaw's `store/messages.db`). Raw snapshots are immutable. Research runs require human approval before artifacts are written.
+Pipeline state lives in `groups/idea-maze/data/lab.db` (separate from NanoClaw's `store/messages.db`). Raw snapshots are immutable. Reddit is the active automated harvest source on `main`; the Gmail and Telegram ingestors are scaffolded but currently disabled. User-triggered research lands in `review_gate`, while scheduled opportunity processing can auto-approve top-scoring items.
 
-Full pipeline runs automatically on a schedule via NanoClaw's task system. Run `tsx run-pipeline.ts` to trigger manually.
+The scheduled pipeline runs automatically via NanoClaw's task system. To run those scheduled stages manually, use `cd groups/idea-maze/scripts && npx tsx run-pipeline.ts`.
 
 ## What It Supports
 
 - **Telegram operator interface** - Control the pipeline, trigger harvests, review/approve research runs, and check status from Telegram
-- **Idea Maze pipeline** - Automated Reddit ingestion with scoring, insight extraction, opportunity clustering, and approval-gated research
+- **Idea Maze pipeline** - Automated Reddit ingestion with scoring, insight extraction, opportunity clustering, and follow-on research processing
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory and isolated filesystem; the `idea-maze` group is the dedicated pipeline workspace
 - **Main channel** - Your private Telegram self-chat for admin control; pipeline group is completely isolated
 - **Scheduled tasks** - Recurring pipeline jobs: hourly pipeline run, weekly digest Monday at 08:00, raw cleanup nightly
 - **Web access** - Search and fetch content from the Web during research drafting when `TAVILY_API_KEY` is available
-- **Container isolation** - Agents run in Linux containers with only the group folder mounted
-- **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
+- **Container isolation** - Agents run in Linux containers with scoped mounts per group; the main group additionally gets the project workspace for self-modification
+- **Credential security** - Most outbound credentials route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits. The current exception is `TAVILY_API_KEY`, which is passed directly to the container for Idea Maze web enrichment.
 
 ## Usage
 
@@ -160,9 +161,9 @@ The codebase is small enough that Claude can safely modify it.
 
 **Don't add features. Add skills.**
 
-If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
+If you want to add Slack support, don't create a PR that adds Slack to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/slack` branch from your PR that other users can merge into their fork.
 
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
+Users then run `/add-slack` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
 
 ### RFS (Request for Skills)
 
@@ -188,7 +189,7 @@ Telegram --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Respon
                                       data/lab.db
 ```
 
-Single Node.js process. Telegram registers as the operator channel at startup. Agents execute in isolated Linux containers with only the group folder mounted. The idea-maze group runs the discovery pipeline; the main chat is for admin control.
+Single Node.js process. This branch currently imports Telegram as the operator channel at startup. Agents execute in isolated Linux containers with scoped mounts per group; the main group also gets the project workspace. The idea-maze group runs the discovery pipeline; the main chat is for admin control.
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
@@ -216,7 +217,7 @@ Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via W
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials never enter the container — outbound API requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects authentication at the proxy level and supports rate limits and access policies. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
+Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Most outbound credentials stay out of the container because requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects authentication at the proxy level and supports rate limits and access policies. The current exception is `TAVILY_API_KEY`, which is passed into the container for Idea Maze search enrichment. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
 
 **Why no configuration files?**
 
