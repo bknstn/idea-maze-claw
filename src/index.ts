@@ -690,7 +690,10 @@ async function main(): Promise<void> {
         { chatJid, sender: msg.sender },
         'Remote control rejected: sender not authorized',
       );
-      await channel.sendMessage(chatJid, 'Remote control rejected: sender not authorized.');
+      await channel.sendMessage(
+        chatJid,
+        'Remote control rejected: sender not authorized.',
+      );
       return;
     }
 
