@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  NanoClaw fork with an Idea Maze product discovery pipeline. Currently harvests Reddit signals → extracts insights → clusters opportunities → drafts research with review or auto-approval based on score.
+  NanoClaw fork with an Idea Maze product discovery pipeline. It harvests Reddit signals, extracts typed insights, clusters opportunities, learns founder-fit from approvals and rejections, and routes research drafts by final score.
 </p>
 
 <p align="center">
@@ -47,6 +47,14 @@ To restore the default Idea Maze automation after setup or a fresh deploy, run:
 
 ```bash
 npx tsx scripts/setup-idea-maze-schedule.ts
+```
+
+For day-to-day pipeline inspection, the Idea Maze workspace now includes:
+
+```bash
+cd groups/idea-maze/scripts
+npx tsx pipeline-status.ts
+npx tsx explain-opportunity.ts <slug>
 ```
 
 > **Note:** Commands prefixed with `/` are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt.
@@ -95,25 +103,28 @@ The `groups/idea-maze/` workspace runs a Reddit-first product discovery pipeline
 |-------|--------|--------|
 | **Harvest** | `ingest-reddit.ts` | `source_items` with harvest scores |
 | **Insights** | `extract-insights.ts` | Typed signals: pain points, demand signals, workflow gaps, etc. |
-| **Opportunities** | `refresh-opportunities.ts` | Clustered opportunities scored by evidence and diversity |
-| **Processing** | `process-opportunities.ts` | Starts bounded research runs, auto-approves score `9-10`, queues score `7-8` in `review_gate` |
-| **Research (on demand)** | `research-opportunity.ts <slug>` | Draft thesis with optional web enrichment → lands in `review_gate` |
+| **Opportunities** | `refresh-opportunities.ts` | Clustered opportunities with `market_score`, `taste_adjustment`, `final_score`, and durable lifecycle state |
+| **Processing** | `process-opportunities.ts` | Starts bounded research runs, auto-approves final score `9-10`, queues final score `7-8` in `review_gate`, and ignores remaining `<=6` items |
+| **Research (on demand)** | `research-opportunity.ts <slug>` | Draft thesis with optional web enrichment, validation/fallback logging, and a `review_gate` run |
 | **Artifacts** | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` |
 
-Pipeline state lives in `groups/idea-maze/data/lab.db` (separate from NanoClaw's `store/messages.db`). Raw snapshots are immutable. Reddit is the active automated harvest source on `main`; the Gmail and Telegram ingestors are scaffolded but currently disabled. User-triggered research lands in `review_gate`, while scheduled opportunity processing can auto-approve top-scoring items.
+Pipeline state lives in `groups/idea-maze/data/lab.db` (separate from NanoClaw's `store/messages.db`). Raw snapshots are immutable. Reddit is the active automated harvest source on `main`; the Gmail and Telegram ingestors are scaffolded but currently disabled.
+
+The pipeline now keeps a first-class lifecycle on each opportunity via `lifecycle_stage` (`scored`, `shortlisted`, `researching`, `review_gate`, `approved`, `rejected`, `archived`) and stores audit events in `run_events`. Review decisions update a `taste_profile` so future opportunities can receive a founder-fit adjustment without mutating raw harvest evidence or market scoring. Low-score opportunities are archived rather than deleted.
 
 The scheduled pipeline runs automatically via NanoClaw's task system. To run those scheduled stages manually, use `cd groups/idea-maze/scripts && npx tsx run-pipeline.ts`.
 
 ## What It Supports
 
 - **Telegram operator interface** - Control the pipeline, trigger harvests, review/approve research runs, and check status from Telegram
-- **Idea Maze pipeline** - Automated Reddit ingestion with scoring, insight extraction, opportunity clustering, and follow-on research processing
+- **Idea Maze pipeline** - Automated Reddit ingestion with scoring, insight extraction, opportunity clustering, founder-fit learning, and follow-on research processing
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory and isolated filesystem; the `idea-maze` group is the dedicated pipeline workspace
 - **Main channel** - Your private Telegram self-chat for admin control; pipeline group is completely isolated
-- **Scheduled tasks** - Recurring pipeline jobs: hourly pipeline run, weekly digest Monday at 08:00, raw cleanup nightly
+- **Scheduled tasks** - Recurring pipeline jobs: hourly pipeline run, weekly digest Monday at 08:00 in the configured timezone, raw cleanup nightly at 03:00
 - **Web access** - Search and fetch content from the Web during research drafting when `TAVILY_API_KEY` is available
 - **Container isolation** - Agents run in Linux containers with scoped mounts per group; the main group additionally gets the project workspace for self-modification
 - **Credential security** - Most outbound credentials route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits. The current exception is `TAVILY_API_KEY`, which is passed directly to the container for Idea Maze web enrichment.
+- **Operator observability** - `pipeline-status.ts` reports the latest pipeline run and recent warnings; `explain-opportunity.ts` explains evidence, lifecycle, scoring, taste matches, and review history for one slug
 
 ## Usage
 
@@ -133,6 +144,7 @@ Talk to the assistant with the trigger word (default: `@Andy`) from Telegram:
 **Status and queries:**
 ```
 @Andy pipeline status
+@Andy explain opportunity <slug>
 @Andy top opportunities
 @Andy show recent insights
 ```
@@ -201,8 +213,8 @@ Key files:
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/idea-maze/CLAUDE.md` - Idea Maze workspace memory
-- `groups/idea-maze/scripts/` - Pipeline scripts (ingest, insights, opportunities, research, approval)
-- `groups/idea-maze/data/lab.db` - Domain database (source items, insights, opportunities, runs, artifacts)
+- `groups/idea-maze/scripts/` - Pipeline scripts (ingest, insights, opportunities, research, approval, observability)
+- `groups/idea-maze/data/lab.db` - Domain database (source items, insights, opportunities, runs, run events, approvals, artifacts, taste profile)
 - `container/skills/idea-maze/SKILL.md` - Container skill loaded into the idea-maze agent
 
 ## FAQ
