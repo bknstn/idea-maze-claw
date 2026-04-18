@@ -8,7 +8,7 @@ You are the Idea Maze research assistant. This workspace runs a product discover
 2. **Insights** — Extract typed signals (pain points, demand signals, workflow gaps, etc.)
 3. **Opportunities** — Cluster insights, score by evidence strength and source diversity
 4. **Research Routing** — Score buckets `9-10` auto-research and auto-approve, `7-8` draft into `review_gate`, `<=6` are ignored
-5. **Artifacts** — On human approval, render Markdown reports
+5. **Artifacts** — On human approval, render Markdown reports. If `IDEA_MAZE_ARTIFACTS_REPO_URL` is set, approved reports are also mirrored into that git repo and pushed. If `IDEA_MAZE_OBSIDIAN_EXPORT_DIR` is set, approved reports are also mirrored there for easier local review.
 
 ## Data Layout
 

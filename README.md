@@ -11,6 +11,7 @@ This repository is a fork of NanoClaw. NanoClaw provides the underlying chat age
 - Clusters signals into opportunities with market and founder-fit scoring
 - Routes opportunities through `scored`, `shortlisted`, `researching`, `review_gate`, `approved`, `rejected`, and `archived`
 - Produces reviewable research artifacts under `groups/idea-maze/data/artifacts/`
+- Can mirror approved artifacts into a dedicated private Git repo for downstream review workflows
 
 Reddit is the active automated source on `main`. Gmail and Telegram ingestors are scaffolded but currently disabled.
 
@@ -48,7 +49,7 @@ npx tsx scripts/setup-idea-maze-schedule.ts
 | Opportunities | `refresh-opportunities.ts` | Clustered opportunities with market and taste scoring |
 | Processing | `process-opportunities.ts` | Queueing, auto-approval, and review-gate decisions |
 | Research | `research-opportunity.ts <slug>` | Draft thesis plus validation log |
-| Artifacts | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` |
+| Artifacts | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` and optional GitHub repo mirror |
 
 Run the scheduled stages manually:
 
@@ -95,10 +96,17 @@ Key paths:
 
 - `groups/idea-maze/data/lab.db`: pipeline state
 - `groups/idea-maze/data/artifacts/`: approved research outputs
+- `groups/idea-maze/data/artifacts-repo/`: default local checkout used for optional artifact repo mirroring
 - `groups/idea-maze/scripts/`: ingestion, scoring, research, and observability scripts
 - `src/index.ts`: host orchestrator
 - `src/task-scheduler.ts`: scheduled task runner
 - `src/container-runner.ts`: container execution
+
+Optional artifact mirror config:
+
+- `IDEA_MAZE_ARTIFACTS_REPO_URL`: SSH URL of the private repo that should receive approved artifacts
+- `IDEA_MAZE_ARTIFACTS_REPO_BRANCH`: branch to push to, defaults to `main`
+- `IDEA_MAZE_ARTIFACTS_REPO_DIR`: optional checkout path override; defaults to `groups/idea-maze/data/artifacts-repo/` inside the active group workspace
 
 ## Notes
 
