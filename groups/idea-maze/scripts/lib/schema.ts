@@ -58,7 +58,11 @@ export function initSchema(db: Database.Database): void {
       title               TEXT    NOT NULL,
       thesis              TEXT    NOT NULL,
       score               REAL    NOT NULL DEFAULT 0,
+      market_score        REAL    NOT NULL DEFAULT 0,
+      taste_adjustment    REAL    NOT NULL DEFAULT 0,
+      final_score         REAL    NOT NULL DEFAULT 0,
       status              TEXT    NOT NULL DEFAULT 'active',
+      lifecycle_stage     TEXT    NOT NULL DEFAULT 'scored',
       cluster_key         TEXT    NOT NULL,
       metadata_json       TEXT    NOT NULL DEFAULT '{}',
       created_at_utc      TEXT    NOT NULL,
@@ -135,7 +139,59 @@ export function initSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS ix_app_state_updated_at_utc ON app_state(updated_at_utc);
+
+    CREATE TABLE IF NOT EXISTS run_events (
+      id              INTEGER PRIMARY KEY,
+      run_id          INTEGER REFERENCES runs(id) ON DELETE CASCADE,
+      opportunity_id  INTEGER REFERENCES opportunities(id) ON DELETE CASCADE,
+      event_type      TEXT    NOT NULL,
+      stage           TEXT,
+      actor           TEXT    NOT NULL DEFAULT 'system',
+      status          TEXT    NOT NULL DEFAULT 'info',
+      summary         TEXT    NOT NULL,
+      payload_json    TEXT    NOT NULL DEFAULT '{}',
+      created_at_utc  TEXT    NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS ix_run_events_run_id         ON run_events(run_id);
+    CREATE INDEX IF NOT EXISTS ix_run_events_opportunity_id ON run_events(opportunity_id);
+    CREATE INDEX IF NOT EXISTS ix_run_events_stage          ON run_events(stage);
+    CREATE INDEX IF NOT EXISTS ix_run_events_status         ON run_events(status);
+    CREATE INDEX IF NOT EXISTS ix_run_events_created_at_utc ON run_events(created_at_utc);
+
+    CREATE TABLE IF NOT EXISTS feedback_features (
+      id              INTEGER PRIMARY KEY,
+      run_id          INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      opportunity_id  INTEGER NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+      decision        TEXT    NOT NULL,
+      feature_type    TEXT    NOT NULL,
+      feature_value   TEXT    NOT NULL,
+      created_at_utc  TEXT    NOT NULL,
+      UNIQUE(run_id, feature_type, feature_value)
+    );
+
+    CREATE INDEX IF NOT EXISTS ix_feedback_features_run_id         ON feedback_features(run_id);
+    CREATE INDEX IF NOT EXISTS ix_feedback_features_opportunity_id ON feedback_features(opportunity_id);
+    CREATE INDEX IF NOT EXISTS ix_feedback_features_type_value     ON feedback_features(feature_type, feature_value);
+
+    CREATE TABLE IF NOT EXISTS taste_profile (
+      id              INTEGER PRIMARY KEY,
+      feature_type    TEXT    NOT NULL,
+      feature_value   TEXT    NOT NULL,
+      approved_count  INTEGER NOT NULL DEFAULT 0,
+      rejected_count  INTEGER NOT NULL DEFAULT 0,
+      learned_weight  REAL    NOT NULL DEFAULT 0,
+      updated_at_utc  TEXT    NOT NULL,
+      UNIQUE(feature_type, feature_value)
+    );
+
+    CREATE INDEX IF NOT EXISTS ix_taste_profile_type_value ON taste_profile(feature_type, feature_value);
+    CREATE INDEX IF NOT EXISTS ix_taste_profile_updated_at ON taste_profile(updated_at_utc);
   `);
+
+  ensureCompatibilityColumns(db);
+  ensureCompatibilityIndexes(db);
+  backfillOpportunityState(db);
 
   // FTS5 tables — CREATE VIRTUAL TABLE doesn't support IF NOT EXISTS,
   // so we check for existence first.
@@ -235,5 +291,95 @@ export function initSchema(db: Database.Database): void {
       INSERT INTO opportunities_fts(rowid, title, thesis)
         VALUES (new.id, new.title, new.thesis);
     END;
+  `);
+}
+
+function getColumnNames(db: Database.Database, table: string): Set<string> {
+  return new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+      .map((row) => row.name),
+  );
+}
+
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  const columns = getColumnNames(db, table);
+  if (!columns.has(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function ensureCompatibilityColumns(db: Database.Database): void {
+  addColumnIfMissing(db, "opportunities", "market_score", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "opportunities", "taste_adjustment", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "opportunities", "final_score", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "opportunities", "lifecycle_stage", "TEXT NOT NULL DEFAULT 'scored'");
+}
+
+function ensureCompatibilityIndexes(db: Database.Database): void {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS ix_opportunities_market_score    ON opportunities(market_score);
+    CREATE INDEX IF NOT EXISTS ix_opportunities_final_score     ON opportunities(final_score);
+    CREATE INDEX IF NOT EXISTS ix_opportunities_lifecycle_stage ON opportunities(lifecycle_stage);
+  `);
+}
+
+function backfillOpportunityState(db: Database.Database): void {
+  db.exec(`
+    UPDATE opportunities
+    SET market_score = CASE
+          WHEN market_score = 0 THEN score
+          ELSE market_score
+        END,
+        final_score = CASE
+          WHEN final_score = 0 THEN score
+          ELSE final_score
+        END,
+        score = CASE
+          WHEN final_score != 0 THEN final_score
+          ELSE score
+        END
+  `);
+
+  db.exec(`
+    UPDATE opportunities
+    SET lifecycle_stage = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM artifacts a
+        WHERE a.opportunity_id = opportunities.id
+      ) THEN 'approved'
+      WHEN EXISTS (
+        SELECT 1 FROM runs r
+        WHERE r.target_id = CAST(opportunities.id AS TEXT)
+          AND r.status = 'review_gate'
+      ) THEN 'review_gate'
+      WHEN EXISTS (
+        SELECT 1 FROM runs r
+        WHERE r.target_id = CAST(opportunities.id AS TEXT)
+          AND r.status = 'running'
+      ) THEN 'researching'
+      WHEN EXISTS (
+        SELECT 1 FROM runs r
+        WHERE r.target_id = CAST(opportunities.id AS TEXT)
+          AND r.status = 'rejected'
+      ) THEN 'rejected'
+      WHEN status = 'archived' THEN 'archived'
+      WHEN final_score >= 7 THEN 'shortlisted'
+      ELSE 'scored'
+    END
+    WHERE lifecycle_stage IS NULL
+       OR lifecycle_stage = ''
+       OR lifecycle_stage = 'scored'
+  `);
+
+  db.exec(`
+    UPDATE opportunities
+    SET lifecycle_stage = 'archived'
+    WHERE status = 'archived'
+      AND lifecycle_stage NOT IN ('approved', 'review_gate', 'researching')
   `);
 }

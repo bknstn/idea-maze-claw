@@ -3,6 +3,11 @@
  * Ported from idea-maze-lab flows/harvest.md and flows/research.md.
  */
 
+export const HARVEST_PROMPT_NAME = "idea-maze-harvest";
+export const HARVEST_PROMPT_VERSION = "2026-04-18.1";
+export const RESEARCH_PROMPT_NAME = "idea-maze-research";
+export const RESEARCH_PROMPT_VERSION = "2026-04-18.1";
+
 export const HARVEST_SYSTEM_PROMPT = `You are an analyst extracting product opportunity signals from raw source content.
 
 ## Goal

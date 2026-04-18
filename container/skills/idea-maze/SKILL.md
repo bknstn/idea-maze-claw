@@ -30,10 +30,14 @@ cd /workspace/group/scripts && tsx <script>.ts [args]
 ### Research
 - `research-opportunity.ts <slug>` — Draft research for an opportunity (manual runs land in `review_gate`)
 - `process-opportunities.ts` — Route scored opportunities: `9-10` auto-approve, `7-8` queue for manual review, `<=6` ignore
+- `explain-opportunity.ts <slug>` — Show lifecycle, evidence summary, market score, taste adjustment, final score, and review history for one opportunity
 
 ### Review Gate
 - `approve-run.ts <run_id> [notes]` — Approve a run, write Markdown artifact
 - `reject-run.ts <run_id> [notes]` — Reject a run, record decision
+
+### Observability
+- `pipeline-status.ts` — Show the latest pipeline run, stage outcomes, queue counts, and recent warnings/errors from the audit trail
 
 ## Long-running Operations
 
@@ -62,17 +66,7 @@ This lets the user know the request was received while the work runs.
 ## Quick Status
 
 ```bash
-cd /workspace/group/scripts && tsx -e "
-import { getDb } from './lib/db.ts';
-const db = getDb();
-const counts = {
-  sources: db.prepare('SELECT COUNT(*) as n FROM source_items').get(),
-  insights: db.prepare('SELECT COUNT(*) as n FROM insights').get(),
-  opportunities: db.prepare('SELECT COUNT(*) as n FROM opportunities').get(),
-  pendingRuns: db.prepare(\"SELECT COUNT(*) as n FROM runs WHERE status = 'review_gate'\").get()
-};
-console.log(JSON.stringify(counts, null, 2));
-"
+cd /workspace/group/scripts && tsx pipeline-status.ts
 ```
 
 ## Common Workflows
@@ -90,6 +84,11 @@ const db = getDb();
 const runs = db.prepare(\"SELECT r.id, r.status, o.title FROM runs r JOIN opportunities o ON o.id = r.target_id WHERE r.status = 'review_gate'\").all();
 console.log(JSON.stringify(runs, null, 2));
 "
+```
+
+### Explain one opportunity
+```bash
+cd /workspace/group/scripts && tsx explain-opportunity.ts <slug>
 ```
 
 ## Scheduling
@@ -147,4 +146,4 @@ Pipeline settings are stored in the `app_state` table:
 | `reddit_subreddits` | `["SaaS","startups","webdev"]` | Subreddits to harvest |
 | `gmail_query` | `newer_than:1d -category:promotions` | Gmail search filter |
 | `telegram_channels` | `["channel_username"]` | Telegram channels to follow |
-| `opportunity score policy` | `9-10 auto`, `7-8 manual`, `<=6 ignore` | Built-in research routing thresholds |
+| `opportunity score policy` | `9-10 auto`, `7-8 manual`, `<=6 ignore` | Built-in research routing thresholds applied to `final_score` |

@@ -2,6 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type Database from "better-sqlite3";
 
+import { setOpportunityLifecycle } from "./opportunity-state.ts";
+import { recordRunEvent } from "./run-events.ts";
+import { recomputeAllOpportunityScores, updateTasteProfileFromDecision } from "./taste.ts";
+
 const GROUP_DIR = process.env.WORKSPACE_GROUP ?? "/workspace/group";
 
 export interface ResearchDraft {
@@ -111,6 +115,31 @@ export function approveResearchRun(
   ).run(opportunityId, runId, path, now, now);
   db.prepare("UPDATE runs SET status = 'approved', completed_at_utc = ? WHERE id = ?").run(now, runId);
   db.prepare("UPDATE opportunities SET last_reviewed_at_utc = ? WHERE id = ?").run(now, opportunityId);
+  setOpportunityLifecycle(db, opportunityId, "approved", {
+    payload: {
+      approval_notes: notes,
+    },
+    runId,
+    summary: `Research run #${runId} approved.`,
+  });
+  updateTasteProfileFromDecision(db, {
+    decision: "approved",
+    opportunityId,
+    runId,
+  });
+  recomputeAllOpportunityScores(db);
+  recordRunEvent(db, {
+    eventType: "review.approved",
+    opportunityId,
+    payload: {
+      artifact_path: path,
+      notes,
+    },
+    runId,
+    stage: "review",
+    status: "ok",
+    summary: `Research run #${runId} approved.`,
+  });
 
   return { path, opportunityId, draft };
 }
@@ -134,6 +163,30 @@ export function rejectResearchRun(
   const opportunityId = Number(run.target_id);
   if (Number.isFinite(opportunityId)) {
     db.prepare("UPDATE opportunities SET last_reviewed_at_utc = ? WHERE id = ?").run(now, opportunityId);
+    setOpportunityLifecycle(db, opportunityId, "rejected", {
+      payload: {
+        rejection_notes: notes,
+      },
+      runId,
+      summary: `Research run #${runId} rejected.`,
+    });
+    updateTasteProfileFromDecision(db, {
+      decision: "rejected",
+      opportunityId,
+      runId,
+    });
+    recomputeAllOpportunityScores(db);
+    recordRunEvent(db, {
+      eventType: "review.rejected",
+      opportunityId,
+      payload: {
+        notes,
+      },
+      runId,
+      stage: "review",
+      status: "ok",
+      summary: `Research run #${runId} rejected.`,
+    });
     return { opportunityId };
   }
 

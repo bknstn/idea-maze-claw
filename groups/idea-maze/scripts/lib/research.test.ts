@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./llm.ts", () => ({
+  RESEARCH_MODEL: "claude-sonnet-4-6",
   generateResearchJson: mocks.generateResearchJson,
   isLlmConfigured: () => true,
 }));
@@ -145,11 +146,15 @@ describe("researchOpportunity", () => {
         product_concept: string;
         thesis: string;
       };
+      prompt_metadata: {
+        validation_status: string;
+      };
     };
 
     expect(run.status).toBe("review_gate");
     expect(run.error).toBeNull();
     expect(metadata.draft.thesis).toBe("Teams keep reconciling invoices by hand.");
     expect(metadata.draft.product_concept).toContain("finance-ops");
+    expect(metadata.prompt_metadata.validation_status).toBe("fallback_template");
   });
 });

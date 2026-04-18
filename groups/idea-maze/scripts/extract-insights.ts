@@ -9,10 +9,12 @@
  */
 
 import { getDb, closeDb } from "./lib/db.ts";
+import { EXTRACTION_BATCH_SIZE, EXTRACTION_MODEL, generateBatchJson, isLlmConfigured } from "./lib/llm.ts";
+import { HARVEST_PROMPT_NAME, HARVEST_PROMPT_VERSION, HARVEST_SYSTEM_PROMPT, buildBatchHarvestUserPrompt } from "./lib/prompts.ts";
+import { classifyFailure, withStageRunContext } from "./lib/run-events.ts";
 import { initSchema } from "./lib/schema.ts";
 import { getUnprocessedItems, type SourceItemRow } from "./lib/queries.ts";
-import { isLlmConfigured, generateBatchJson, EXTRACTION_BATCH_SIZE } from "./lib/llm.ts";
-import { HARVEST_SYSTEM_PROMPT, buildBatchHarvestUserPrompt } from "./lib/prompts.ts";
+import { validateHarvestBatchResponse } from "./lib/validation.ts";
 
 // --- Types ---
 
@@ -114,7 +116,10 @@ interface LlmBatchResponse {
   items: Array<{ index: number; insights: LlmInsightBatch["insights"] }>;
 }
 
-async function llmBatchInsights(items: SourceItemRow[]): Promise<Map<number, InsightPayload[]>> {
+async function llmBatchInsights(items: SourceItemRow[]): Promise<{
+  errors: string[];
+  insights: Map<number, InsightPayload[]>;
+}> {
   const batchInput = items.map((item, i) => ({
     index: i,
     source: item.source,
@@ -125,10 +130,11 @@ async function llmBatchInsights(items: SourceItemRow[]): Promise<Map<number, Ins
   }));
 
   const prompt = buildBatchHarvestUserPrompt(batchInput);
-  const result = await generateBatchJson<LlmBatchResponse>(HARVEST_SYSTEM_PROMPT, prompt);
+  const result = await generateBatchJson<unknown>(HARVEST_SYSTEM_PROMPT, prompt);
+  const validated = validateHarvestBatchResponse(result);
 
   const out = new Map<number, InsightPayload[]>();
-  for (const entry of result.items ?? []) {
+  for (const entry of validated.items) {
     const item = items[entry.index];
     if (!item) continue;
     const harvestScore = harvestScoreFromMeta(item.metadata_json);
@@ -146,7 +152,10 @@ async function llmBatchInsights(items: SourceItemRow[]): Promise<Map<number, Ins
       },
     })));
   }
-  return out;
+  return {
+    errors: validated.errors,
+    insights: out,
+  };
 }
 
 function heuristicInsights(item: SourceItemRow): InsightPayload[] {
@@ -197,90 +206,165 @@ function heuristicInsights(item: SourceItemRow): InsightPayload[] {
 async function main() {
   const db = getDb();
   initSchema(db);
+  const stageRun = withStageRunContext(db, "extract-insights", {
+    requestedBy: process.env.IDEA_MAZE_PARENT_RUN_ID ? "system" : "user",
+  });
 
-  const limitArg = process.argv.indexOf("--limit");
-  const limit = limitArg >= 0 ? Number(process.argv[limitArg + 1]) || 50 : 50;
+  try {
+    const limitArg = process.argv.indexOf("--limit");
+    const limit = limitArg >= 0 ? Number(process.argv[limitArg + 1]) || 50 : 50;
 
-  const items = getUnprocessedItems(limit);
-  if (!items.length) {
-    console.log("No unprocessed source items found.");
-    closeDb();
-    return;
-  }
-
-  const PARALLEL_BATCHES = 3;
-  console.log(`Processing ${items.length} unprocessed source items...`);
-  const useLlm = isLlmConfigured();
-  console.log(`Strategy: ${useLlm ? `LLM batch (size=${EXTRACTION_BATCH_SIZE}, parallel=${PARALLEL_BATCHES})` : "heuristic only"}`);
-
-  const insertInsight = db.prepare(`
-    INSERT INTO insights (source_item_id, insight_type, summary, evidence_score, confidence, status, metadata_json, created_at_utc)
-    VALUES (?, ?, ?, ?, ?, 'new', ?, ?)
-  `);
-
-  let totalCreated = 0;
-
-  if (useLlm) {
-    // Split into batches
-    const batches: SourceItemRow[][] = [];
-    for (let i = 0; i < items.length; i += EXTRACTION_BATCH_SIZE) {
-      batches.push(items.slice(i, i + EXTRACTION_BATCH_SIZE));
+    const items = getUnprocessedItems(limit);
+    if (!items.length) {
+      console.log("No unprocessed source items found.");
+      stageRun.finish("completed", "No unprocessed source items found.", {
+        created_insights: 0,
+        processed_items: 0,
+      });
+      return;
     }
 
-    // Process batches with limited parallelism
-    for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
-      const chunk = batches.slice(i, i + PARALLEL_BATCHES);
-      const results = await Promise.all(
-        chunk.map((batch) =>
-          llmBatchInsights(batch).catch((err) => {
-            console.warn(`  Batch failed, falling back to heuristics: ${err}`);
-            const fallback = new Map<number, InsightPayload[]>();
-            batch.forEach((item, idx) => fallback.set(idx, heuristicInsights(item)));
-            return fallback;
-          }),
-        ),
-      );
+    const PARALLEL_BATCHES = 3;
+    console.log(`Processing ${items.length} unprocessed source items...`);
+    const useLlm = isLlmConfigured();
+    console.log(`Strategy: ${useLlm ? `LLM batch (size=${EXTRACTION_BATCH_SIZE}, parallel=${PARALLEL_BATCHES})` : "heuristic only"}`);
 
-      for (let b = 0; b < chunk.length; b++) {
-        const batch = chunk[b];
-        const resultMap = results[b];
-        for (let idx = 0; idx < batch.length; idx++) {
-          const item = batch[idx];
-          const payloads = resultMap.get(idx) ?? heuristicInsights(item);
-          for (const p of payloads) {
-            insertInsight.run(
-              p.source_item_id, p.insight_type, p.summary,
-              p.evidence_score, p.confidence,
-              JSON.stringify(p.metadata_json), new Date().toISOString(),
-            );
-            totalCreated++;
+    const insertInsight = db.prepare(`
+      INSERT INTO insights (source_item_id, insight_type, summary, evidence_score, confidence, status, metadata_json, created_at_utc)
+      VALUES (?, ?, ?, ?, ?, 'new', ?, ?)
+    `);
+
+    let totalCreated = 0;
+    let totalFallbackItems = 0;
+    let totalValidationWarnings = 0;
+
+    if (useLlm) {
+      const batches: SourceItemRow[][] = [];
+      for (let i = 0; i < items.length; i += EXTRACTION_BATCH_SIZE) {
+        batches.push(items.slice(i, i + EXTRACTION_BATCH_SIZE));
+      }
+
+      for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
+        const chunk = batches.slice(i, i + PARALLEL_BATCHES);
+        const results = await Promise.all(
+          chunk.map(async (batch) => {
+            try {
+              return await llmBatchInsights(batch);
+            } catch (err) {
+              console.warn(`  Batch failed, falling back to heuristics: ${err}`);
+              stageRun.emit({
+                eventType: "fallback.used",
+                payload: {
+                  fallback: "heuristic",
+                  failure_class: classifyFailure(err),
+                  item_ids: batch.map((item) => item.id),
+                  model: EXTRACTION_MODEL,
+                  prompt_name: HARVEST_PROMPT_NAME,
+                  prompt_version: HARVEST_PROMPT_VERSION,
+                },
+                status: "warning",
+                summary: `Harvest batch failed; fell back to heuristics for ${batch.length} item(s).`,
+              });
+              return {
+                errors: [],
+                insights: new Map<number, InsightPayload[]>(),
+              };
+            }
+          }),
+        );
+
+        for (let b = 0; b < chunk.length; b++) {
+          const batch = chunk[b];
+          const result = results[b];
+          if (result.errors.length) {
+            const invalidItemIds = batch
+              .filter((_, idx) => !result.insights.has(idx))
+              .map((item) => item.id);
+            totalValidationWarnings += result.errors.length;
+            if (invalidItemIds.length) {
+              stageRun.emit({
+                eventType: "validation.warning",
+                payload: {
+                  errors: result.errors,
+                  invalid_item_ids: invalidItemIds,
+                  model: EXTRACTION_MODEL,
+                  prompt_name: HARVEST_PROMPT_NAME,
+                  prompt_version: HARVEST_PROMPT_VERSION,
+                  validation_status: "partial_fallback",
+                },
+                status: "warning",
+                summary: `Harvest validation failed for ${invalidItemIds.length} item(s); using heuristics for those items.`,
+              });
+            }
           }
-          if (payloads.length) {
-            process.stdout.write(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]\n`);
+
+          for (let idx = 0; idx < batch.length; idx++) {
+            const item = batch[idx];
+            const payloads = result.insights.get(idx) ?? heuristicInsights(item);
+            if (!result.insights.has(idx)) {
+              totalFallbackItems++;
+            }
+            for (const p of payloads) {
+              insertInsight.run(
+                p.source_item_id, p.insight_type, p.summary,
+                p.evidence_score, p.confidence,
+                JSON.stringify(p.metadata_json), new Date().toISOString(),
+              );
+              totalCreated++;
+            }
+            if (payloads.length) {
+              process.stdout.write(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]\n`);
+            }
           }
         }
+        console.log(`  Batches ${i + 1}-${Math.min(i + PARALLEL_BATCHES, batches.length)} / ${batches.length} done`);
       }
-      console.log(`  Batches ${i + 1}-${Math.min(i + PARALLEL_BATCHES, batches.length)} / ${batches.length} done`);
+    } else {
+      totalFallbackItems = items.length;
+      stageRun.emit({
+        eventType: "fallback.used",
+        payload: {
+          fallback: "heuristic_only",
+          reason: "ANTHROPIC_API_KEY missing",
+          validation_status: "not_attempted",
+        },
+        status: "warning",
+        summary: "LLM unavailable; using heuristic insight extraction.",
+      });
+      for (const item of items) {
+        const payloads = heuristicInsights(item);
+        for (const p of payloads) {
+          insertInsight.run(
+            p.source_item_id, p.insight_type, p.summary,
+            p.evidence_score, p.confidence,
+            JSON.stringify(p.metadata_json), new Date().toISOString(),
+          );
+          totalCreated++;
+        }
+        if (payloads.length) {
+          console.log(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]`);
+        }
+      }
     }
-  } else {
-    for (const item of items) {
-      const payloads = heuristicInsights(item);
-      for (const p of payloads) {
-        insertInsight.run(
-          p.source_item_id, p.insight_type, p.summary,
-          p.evidence_score, p.confidence,
-          JSON.stringify(p.metadata_json), new Date().toISOString(),
-        );
-        totalCreated++;
-      }
-      if (payloads.length) {
-        console.log(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]`);
-      }
-    }
-  }
 
-  console.log(`\nDone. Created ${totalCreated} insights from ${items.length} source items.`);
-  closeDb();
+    console.log(`\nDone. Created ${totalCreated} insights from ${items.length} source items.`);
+    stageRun.finish("completed", `Created ${totalCreated} insights from ${items.length} source items.`, {
+      created_insights: totalCreated,
+      fallback_items: totalFallbackItems,
+      model: useLlm ? EXTRACTION_MODEL : null,
+      processed_items: items.length,
+      prompt_name: HARVEST_PROMPT_NAME,
+      prompt_version: HARVEST_PROMPT_VERSION,
+      validation_warnings: totalValidationWarnings,
+    });
+  } catch (err) {
+    stageRun.finish("error", `Insight extraction failed: ${err instanceof Error ? err.message : String(err)}`, {
+      failure_class: classifyFailure(err),
+    });
+    throw err;
+  } finally {
+    closeDb();
+  }
 }
 
 main().catch((err) => {

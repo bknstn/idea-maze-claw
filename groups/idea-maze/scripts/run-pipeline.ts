@@ -12,6 +12,7 @@
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import { getDb, closeDb } from "./lib/db.ts";
+import { PARENT_RUN_ID_ENV, createRun, recordRunEvent, updateRunStatus } from "./lib/run-events.ts";
 import { initSchema } from "./lib/schema.ts";
 import { acquireRunLock, releaseRunLock, getCounts } from "./lib/queries.ts";
 
@@ -27,13 +28,21 @@ interface StageResult {
 const DEFAULT_STAGE_TIMEOUT_MS = 5 * 60 * 1000;
 const PROCESS_OPPORTUNITIES_TIMEOUT_MS = 15 * 60 * 1000;
 
-function runStage(name: string, script: string, timeoutMs = DEFAULT_STAGE_TIMEOUT_MS): StageResult {
+function runStage(
+  name: string,
+  script: string,
+  parentRunId: number,
+  timeoutMs = DEFAULT_STAGE_TIMEOUT_MS,
+): StageResult {
   const start = Date.now();
   try {
     const output = execSync(`cd "${SCRIPTS_DIR}" && tsx ${script}`, {
       encoding: "utf-8",
+      env: {
+        ...process.env,
+        [PARENT_RUN_ID_ENV]: String(parentRunId),
+      },
       timeout: timeoutMs,
-      env: process.env,
     });
     return { stage: name, ok: true, output: output.trim(), durationMs: Date.now() - start };
   } catch (err: any) {
@@ -45,9 +54,23 @@ function runStage(name: string, script: string, timeoutMs = DEFAULT_STAGE_TIMEOU
 function main() {
   const db = getDb();
   initSchema(db);
+  const pipelineRunId = createRun(db, {
+    metadata: {
+      trigger: "pipeline",
+    },
+    requestedBy: "system",
+    runType: "pipeline",
+    targetId: "pipeline",
+    targetType: "pipeline",
+  });
 
   if (!acquireRunLock("pipeline")) {
     console.log("Pipeline already running (lock held). Skipping.");
+    updateRunStatus(db, pipelineRunId, "completed", {
+      metadata: {
+        skipped: true,
+      },
+    });
     closeDb();
     return;
   }
@@ -57,15 +80,16 @@ function main() {
 
   try {
     // Ingestion
-    results.push(runStage("ingest-reddit", "ingest-reddit.ts"));
+    results.push(runStage("ingest-reddit", "ingest-reddit.ts", pipelineRunId));
 
     // Analysis
-    results.push(runStage("extract-insights", "extract-insights.ts"));
-    results.push(runStage("refresh-opportunities", "refresh-opportunities.ts"));
+    results.push(runStage("extract-insights", "extract-insights.ts", pipelineRunId));
+    results.push(runStage("refresh-opportunities", "refresh-opportunities.ts", pipelineRunId));
     results.push(
       runStage(
         "process-opportunities",
         "process-opportunities.ts",
+        pipelineRunId,
         PROCESS_OPPORTUNITIES_TIMEOUT_MS,
       ),
     );
@@ -80,12 +104,36 @@ function main() {
     const status = r.ok ? "OK" : "FAILED";
     const lastLine = r.output.split("\n").pop() ?? "";
     console.log(`  ${r.stage}: ${status} (${r.durationMs}ms) — ${lastLine}`);
+    recordRunEvent(db, {
+      eventType: r.ok ? "pipeline.stage_completed" : "pipeline.stage_failed",
+      payload: {
+        duration_ms: r.durationMs,
+        output_tail: lastLine,
+      },
+      runId: pipelineRunId,
+      stage: r.stage,
+      status: r.ok ? "ok" : "error",
+      summary: `${r.stage} ${r.ok ? "completed" : "failed"} in ${r.durationMs}ms.`,
+    });
   }
   console.log(`\nTotals: ${counts.source_items} sources, ${counts.insights} insights, ${counts.opportunities} opportunities, ${counts.runs_pending} pending runs`);
 
   const failed = results.filter((r) => !r.ok);
   if (failed.length) {
     console.error(`\n${failed.length} stage(s) failed: ${failed.map((r) => r.stage).join(", ")}`);
+    updateRunStatus(db, pipelineRunId, "error", {
+      error: failed.map((r) => `${r.stage}: ${(r.output.split("\n").pop() ?? "").trim()}`).join("; "),
+      metadata: {
+        counts,
+        failed_stages: failed.map((r) => r.stage),
+      },
+    });
+  } else {
+    updateRunStatus(db, pipelineRunId, "completed", {
+      metadata: {
+        counts,
+      },
+    });
   }
 
   closeDb();

@@ -1,14 +1,23 @@
 import type Database from "better-sqlite3";
+
 import { closeDb, getDb } from "./db.ts";
+import { generateResearchJson, isLlmConfigured, RESEARCH_MODEL } from "./llm.ts";
+import { setOpportunityLifecycle } from "./opportunity-state.ts";
+import {
+  RESEARCH_PROMPT_NAME,
+  RESEARCH_PROMPT_VERSION,
+  RESEARCH_SYSTEM_PROMPT,
+  buildResearchUserPrompt,
+} from "./prompts.ts";
+import { classifyFailure, createRun, recordRunEvent } from "./run-events.ts";
 import { initSchema } from "./schema.ts";
-import { isLlmConfigured, generateResearchJson as generateJson } from "./llm.ts";
-import { RESEARCH_SYSTEM_PROMPT, buildResearchUserPrompt } from "./prompts.ts";
 import {
   enrichOpportunityWithSearch,
   isSearchConfigured,
   type SearchEvidenceItem,
 } from "./search.ts";
 import { approveResearchRun, type ResearchDraft } from "./review.ts";
+import { type ValidatedResearchDraft, validateResearchDraft } from "./validation.ts";
 
 interface Logger {
   log: (...args: any[]) => void;
@@ -21,6 +30,7 @@ export interface ResearchOpportunityOptions {
   db?: Database.Database;
   logger?: Logger;
   requestedBy?: string;
+  runIdForEvents?: number | null;
 }
 
 export interface ResearchOpportunityResult {
@@ -40,7 +50,7 @@ async function buildLlmDraft(
   sourceItems: any[],
   searchItems: SearchEvidenceItem[],
   searchAnswers: string[],
-): Promise<Omit<ResearchDraft, "opportunity_slug" | "source_refs">> {
+): Promise<unknown> {
   const inbox = sourceItems.filter((s) => s.source === "gmail").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
   const telegram = sourceItems.filter((s) => s.source === "telegram").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
   const reddit = sourceItems.filter((s) => s.source === "reddit").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
@@ -57,7 +67,7 @@ async function buildLlmDraft(
     search_synthesis: searchAnswers,
   });
 
-  return generateJson<Omit<ResearchDraft, "opportunity_slug" | "source_refs">>(
+  return generateResearchJson<unknown>(
     RESEARCH_SYSTEM_PROMPT,
     prompt,
   );
@@ -104,6 +114,16 @@ function buildTemplateDraft(
   };
 }
 
+function toPromptMetadata() {
+  return {
+    model: isLlmConfigured() ? RESEARCH_MODEL : null,
+    prompt_name: RESEARCH_PROMPT_NAME,
+    prompt_version: RESEARCH_PROMPT_VERSION,
+    validation_errors: [] as string[],
+    validation_status: isLlmConfigured() ? "pending" : "not_attempted",
+  };
+}
+
 export async function researchOpportunity(
   target: string,
   options: ResearchOpportunityOptions = {},
@@ -118,9 +138,20 @@ export async function researchOpportunity(
   const approvalMode = options.approvalMode ?? "review_gate";
   const requestedBy = options.requestedBy ?? "user";
   let runId: number | null = null;
+  let opportunityIdForErrors: number | null = null;
   const signalHandlers = new Map<NodeJS.Signals, () => void>();
 
   initSchema(db);
+
+  const emitParentEvent = (
+    input: Omit<Parameters<typeof recordRunEvent>[1], "runId">,
+  ): void => {
+    if (!options.runIdForEvents) return;
+    recordRunEvent(db, {
+      ...input,
+      runId: options.runIdForEvents,
+    });
+  };
 
   const markRunFailed = (reason: string): void => {
     if (runId === null) return;
@@ -129,6 +160,18 @@ export async function researchOpportunity(
       SET status = 'error', completed_at_utc = ?, error = ?
       WHERE id = ? AND status IN ('running', 'review_gate')
     `).run(new Date().toISOString(), reason, runId);
+    recordRunEvent(db, {
+      actor: requestedBy,
+      eventType: "research.failed",
+      opportunityId: opportunityIdForErrors,
+      payload: {
+        failure_class: classifyFailure(reason),
+      },
+      runId,
+      stage: "research",
+      status: "error",
+      summary: reason,
+    });
   };
 
   const installSignalHandler = (signal: NodeJS.Signals, exitCode: number): void => {
@@ -158,25 +201,71 @@ export async function researchOpportunity(
       if (!opp) {
         const now = new Date().toISOString();
         db.prepare(`
-          INSERT INTO opportunities (slug, title, thesis, score, status, cluster_key, metadata_json, created_at_utc, updated_at_utc)
-          VALUES (?, ?, ?, 1.0, 'active', ?, '{"ad_hoc": true}', ?, ?)
+          INSERT INTO opportunities (
+            slug,
+            title,
+            thesis,
+            score,
+            market_score,
+            taste_adjustment,
+            final_score,
+            status,
+            lifecycle_stage,
+            cluster_key,
+            metadata_json,
+            created_at_utc,
+            updated_at_utc
+          )
+          VALUES (?, ?, ?, 1.0, 1.0, 0, 1.0, 'active', 'shortlisted', ?, '{"ad_hoc": true}', ?, ?)
         `).run(slug, target.trim(), `Investigate whether '${target}' could become a focused web product.`, slug, now, now);
         opp = db.prepare("SELECT * FROM opportunities WHERE slug = ?").get(slug) as any;
         logger.log(`Created ad-hoc opportunity: ${slug}`);
       }
     }
 
+    opportunityIdForErrors = Number(opp.id);
     logger.log(`Researching: ${opp.title} (${opp.slug})`);
 
-    const now = new Date().toISOString();
-    const runResult = db.prepare(`
-      INSERT INTO runs (run_type, target_type, target_id, status, requested_by, started_at_utc, metadata_json)
-      VALUES ('research', 'opportunity', ?, 'running', ?, ?, '{}')
-    `).run(String(opp.id), requestedBy, now);
-    runId = Number(runResult.lastInsertRowid);
+    runId = createRun(db, {
+      metadata: {},
+      requestedBy,
+      runType: "research",
+      targetId: String(opp.id),
+      targetType: "opportunity",
+    });
     logger.log(`Created run #${runId}`);
+    recordRunEvent(db, {
+      actor: requestedBy,
+      eventType: "research.started",
+      opportunityId: Number(opp.id),
+      payload: {
+        approval_mode: approvalMode,
+        requested_by: requestedBy,
+      },
+      runId,
+      stage: "research",
+      status: "info",
+      summary: `Research started for ${opp.slug}.`,
+    });
+    emitParentEvent({
+      actor: requestedBy,
+      eventType: "research.started",
+      opportunityId: Number(opp.id),
+      payload: {
+        child_run_id: runId,
+        slug: opp.slug,
+      },
+      stage: "process-opportunities",
+      status: "info",
+      summary: `Spawned research run #${runId} for ${opp.slug}.`,
+    });
     installSignalHandler("SIGINT", 130);
     installSignalHandler("SIGTERM", 143);
+    setOpportunityLifecycle(db, Number(opp.id), "researching", {
+      actor: requestedBy,
+      runId,
+      summary: `Research started for ${opp.slug}.`,
+    });
 
     const sourceItems = db.prepare(`
       SELECT si.* FROM source_items si
@@ -195,6 +284,7 @@ export async function researchOpportunity(
       result_count: number;
       source_item_ids: number[];
     } | null = null;
+    let promptMetadata = toPromptMetadata();
 
     if (isSearchConfigured()) {
       try {
@@ -218,6 +308,19 @@ export async function researchOpportunity(
         );
       } catch (err) {
         logger.warn(`Search enrichment failed, continuing without external research: ${err}`);
+        recordRunEvent(db, {
+          actor: requestedBy,
+          eventType: "fallback.used",
+          opportunityId: Number(opp.id),
+          payload: {
+            failure_class: classifyFailure(err),
+            fallback: "research_without_search",
+          },
+          runId,
+          stage: "research",
+          status: "warning",
+          summary: "Search enrichment failed; continuing without external research.",
+        });
       }
     } else {
       logger.log("No TAVILY_API_KEY — skipping web enrichment.");
@@ -227,13 +330,71 @@ export async function researchOpportunity(
     if (isLlmConfigured()) {
       try {
         logger.log("Building draft via LLM...");
-        draftBody = await buildLlmDraft(opp, sourceItems, searchItems, searchAnswers);
+        const rawDraft = await buildLlmDraft(opp, sourceItems, searchItems, searchAnswers);
+        const validated = validateResearchDraft(rawDraft);
+        if (!validated.value) {
+          promptMetadata = {
+            ...promptMetadata,
+            validation_errors: validated.errors,
+            validation_status: "fallback_template",
+          };
+          recordRunEvent(db, {
+            actor: requestedBy,
+            eventType: "validation.warning",
+            opportunityId: Number(opp.id),
+            payload: promptMetadata,
+            runId,
+            stage: "research",
+            status: "warning",
+            summary: "Research draft validation failed; using template fallback.",
+          });
+          draftBody = buildTemplateDraft(opp, sourceItems, searchItems);
+        } else {
+          promptMetadata = {
+            ...promptMetadata,
+            validation_status: "valid",
+          };
+          draftBody = validated.value as ValidatedResearchDraft;
+        }
       } catch (err) {
         logger.warn(`LLM draft failed, using template: ${err}`);
+        promptMetadata = {
+          ...promptMetadata,
+          validation_errors: [err instanceof Error ? err.message : String(err)],
+          validation_status: "fallback_template",
+        };
+        recordRunEvent(db, {
+          actor: requestedBy,
+          eventType: "fallback.used",
+          opportunityId: Number(opp.id),
+          payload: {
+            ...promptMetadata,
+            failure_class: classifyFailure(err),
+            fallback: "template_draft",
+          },
+          runId,
+          stage: "research",
+          status: "warning",
+          summary: "Research draft LLM call failed; using template fallback.",
+        });
         draftBody = buildTemplateDraft(opp, sourceItems, searchItems);
       }
     } else {
       logger.log("No ANTHROPIC_API_KEY — using template draft.");
+      recordRunEvent(db, {
+        actor: requestedBy,
+        eventType: "fallback.used",
+        opportunityId: Number(opp.id),
+        payload: {
+          ...promptMetadata,
+          fallback: "template_draft",
+          reason: "ANTHROPIC_API_KEY missing",
+        },
+        runId,
+        stage: "research",
+        status: "warning",
+        summary: "LLM unavailable; using template draft.",
+      });
       draftBody = buildTemplateDraft(opp, sourceItems, searchItems);
     }
 
@@ -246,6 +407,7 @@ export async function researchOpportunity(
     db.prepare("UPDATE runs SET status = 'review_gate', metadata_json = ? WHERE id = ?").run(
       JSON.stringify({
         draft,
+        prompt_metadata: promptMetadata,
         research_trace: {
           source_item_count: sourceItems.length,
           external_search: searchTrace,
@@ -253,11 +415,39 @@ export async function researchOpportunity(
       }),
       runId,
     );
+    setOpportunityLifecycle(db, Number(opp.id), "review_gate", {
+      actor: requestedBy,
+      runId,
+      summary: `Research draft ready for ${opp.slug}.`,
+    });
+    recordRunEvent(db, {
+      actor: requestedBy,
+      eventType: "research.draft_ready",
+      opportunityId: Number(opp.id),
+      payload: {
+        ...promptMetadata,
+        approval_mode: approvalMode,
+        source_item_count: sourceItems.length,
+      },
+      runId,
+      stage: "research",
+      status: "ok",
+      summary: `Research draft ready for ${opp.slug}.`,
+    });
 
     if (approvalMode === "auto_approve") {
       const { path } = approveResearchRun(db, runId, options.approvalNotes ?? null);
       logger.log(`Run #${runId} auto-approved.`);
       logger.log(`Artifact written: ${path}`);
+      emitParentEvent({
+        actor: requestedBy,
+        eventType: "research.auto_approved",
+        opportunityId: Number(opp.id),
+        payload: { artifact_path: path, child_run_id: runId },
+        stage: "process-opportunities",
+        status: "ok",
+        summary: `Auto-approved ${opp.slug}.`,
+      });
       return {
         artifactPath: path,
         opportunityId: Number(opp.id),
@@ -276,6 +466,15 @@ export async function researchOpportunity(
     logger.log("Thesis:", draft.thesis.slice(0, 200));
     logger.log(`To approve: tsx approve-run.ts ${runId}`);
     logger.log(`To reject:  tsx reject-run.ts ${runId}`);
+    emitParentEvent({
+      actor: requestedBy,
+      eventType: "research.review_gate",
+      opportunityId: Number(opp.id),
+      payload: { child_run_id: runId },
+      stage: "process-opportunities",
+      status: "info",
+      summary: `${opp.slug} moved to review_gate.`,
+    });
 
     return {
       opportunityId: Number(opp.id),

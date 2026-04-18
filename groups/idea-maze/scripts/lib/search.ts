@@ -191,7 +191,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
       await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
     }
   }
-  throw lastError;
+  throw new Error(`Retry exhaustion after ${maxRetries + 1} attempts: ${String(lastError)}`);
 }
 
 async function tavilySearch(query: string, depth: "basic" | "advanced" = "advanced"): Promise<TavilyResponse> {

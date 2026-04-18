@@ -10,18 +10,22 @@
  */
 
 import { closeDb, getDb } from "./lib/db.ts";
+import { setOpportunityLifecycle } from "./lib/opportunity-state.ts";
 import { classifyOpportunityScore } from "./lib/opportunity-policy.ts";
 import { researchOpportunity } from "./lib/research.ts";
 import { approveResearchRun } from "./lib/review.ts";
+import { withStageRunContext } from "./lib/run-events.ts";
 import { initSchema } from "./lib/schema.ts";
 
 interface OpportunityRow {
   has_any_run: number;
   has_artifact: number;
   id: number;
+  market_score: number;
   pending_run_id: number | null;
-  score: number;
+  final_score: number;
   slug: string;
+  taste_adjustment: number;
   title: string;
 }
 
@@ -48,6 +52,9 @@ function parseNewResearchLimit(argv = process.argv): number {
 async function main() {
   const db = getDb();
   initSchema(db);
+  const stageRun = withStageRunContext(db, "process-opportunities", {
+    requestedBy: process.env.IDEA_MAZE_PARENT_RUN_ID ? "system" : "user",
+  });
   try {
     const maxNewResearchRuns = parseNewResearchLimit();
     const opportunities = db.prepare(`
@@ -55,7 +62,9 @@ async function main() {
         o.id,
         o.slug,
         o.title,
-        o.score,
+        o.market_score,
+        o.final_score,
+        o.taste_adjustment,
         EXISTS(
           SELECT 1
           FROM runs r
@@ -72,11 +81,14 @@ async function main() {
         ) AS pending_run_id
       FROM opportunities o
       WHERE o.status = 'active'
-      ORDER BY o.score DESC, o.updated_at_utc DESC
+      ORDER BY o.final_score DESC, o.updated_at_utc DESC
     `).all() as OpportunityRow[];
 
     if (!opportunities.length) {
       console.log("No opportunities to process.");
+      stageRun.finish("completed", "No opportunities to process.", {
+        processed_opportunities: 0,
+      });
       return;
     }
 
@@ -97,12 +109,24 @@ async function main() {
     let startedNewResearchRuns = 0;
 
     for (const opp of opportunities) {
-      const policy = classifyOpportunityScore(opp.score);
+      const policy = classifyOpportunityScore(opp.final_score);
 
       if (policy.disposition === "ignore") {
         summary.ignored++;
         continue;
       }
+
+      setOpportunityLifecycle(db, opp.id, "shortlisted", {
+        payload: {
+          final_score: opp.final_score,
+          market_score: opp.market_score,
+          review_disposition: policy.disposition,
+          score_bucket: policy.bucket,
+          taste_adjustment: opp.taste_adjustment,
+        },
+        runId: stageRun.runId,
+        summary: `Opportunity shortlisted at final score ${opp.final_score}.`,
+      });
 
       if (policy.disposition === "auto_approve" && opp.pending_run_id) {
         const { path } = approveResearchRun(
@@ -137,6 +161,7 @@ async function main() {
         db,
         logger: console,
         requestedBy: "system",
+        runIdForEvents: stageRun.runId,
       });
 
       if (result.status === "approved") {
@@ -153,6 +178,13 @@ async function main() {
     console.log(`  skipped existing history:           ${summary.skipped_existing}`);
     console.log(`  deferred due to per-run budget:     ${summary.deferred_due_to_budget}`);
     console.log(`  ignored low-score opportunities:    ${summary.ignored}`);
+    stageRun.finish("completed", "Opportunity processing complete.", {
+      ...summary,
+      processed_opportunities: opportunities.length,
+    });
+  } catch (err) {
+    stageRun.finish("error", `Opportunity processing failed: ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
   } finally {
     closeDb();
   }

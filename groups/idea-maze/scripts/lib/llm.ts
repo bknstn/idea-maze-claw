@@ -6,8 +6,8 @@
  */
 
 const API_URL = "https://api.anthropic.com/v1/messages";
-const EXTRACTION_MODEL = "claude-haiku-4-5-20251001"; // fast + cheap for bulk extraction
-const RESEARCH_MODEL = "claude-sonnet-4-6"; // full reasoning for research drafts
+export const EXTRACTION_MODEL = "claude-haiku-4-5-20251001"; // fast + cheap for bulk extraction
+export const RESEARCH_MODEL = "claude-sonnet-4-6"; // full reasoning for research drafts
 const RESEARCH_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 
 export function isLlmConfigured(): boolean {
