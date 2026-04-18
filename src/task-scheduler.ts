@@ -76,6 +76,14 @@ export interface SchedulerDependencies {
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
+export function _rememberFirstTaskResult(
+  current: string | null,
+  candidate: string | null | undefined,
+): string | null {
+  if (current !== null) return current;
+  return candidate ?? null;
+}
+
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
@@ -187,7 +195,7 @@ async function runTask(
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
-          result = streamedOutput.result;
+          result = _rememberFirstTaskResult(result, streamedOutput.result);
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
@@ -207,8 +215,10 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
-      result = output.result;
+      // Prefer the first streamed result for task bookkeeping. Tasks may emit
+      // follow-up notifications after the main summary, which should not
+      // replace the recorded last_result shown in status views.
+      result = _rememberFirstTaskResult(result, output.result);
     }
 
     logger.info(

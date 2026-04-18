@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
+  _rememberFirstTaskResult,
   _resetSchedulerLoopForTests,
   computeNextRun,
   startSchedulerLoop,
@@ -125,5 +126,14 @@ describe('task scheduler', () => {
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
+  });
+
+  it('keeps the first streamed task result for scheduler bookkeeping', () => {
+    const summary = 'Pipeline summary';
+    const followUp = 'Late completion notification';
+
+    expect(_rememberFirstTaskResult(null, summary)).toBe(summary);
+    expect(_rememberFirstTaskResult(summary, followUp)).toBe(summary);
+    expect(_rememberFirstTaskResult(summary, null)).toBe(summary);
   });
 });
