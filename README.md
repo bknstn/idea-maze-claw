@@ -51,6 +51,23 @@ npx tsx scripts/setup-idea-maze-schedule.ts
 
 > **Note:** Commands prefixed with `/` are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt.
 
+## Trunk Shipping
+
+This fork ships directly from `main`.
+
+Default flow:
+
+1. Make the fix.
+2. Run focused tests while you work.
+3. Commit on `main`.
+4. Run `npm run ship:vps`.
+
+`npm run ship:vps` runs the repo verification bundle (`npm run verify`), pushes `origin/main`, deploys `/root/idea-maze-claw` on `idea-maze-vps`, restarts `nanoclaw`, runs `npx tsx setup/index.ts --step verify` on the VPS, and prints the usual `monitor-vps.sh` summary.
+
+If you have unrelated local work in progress, use `npm run ship:vps -- --stash-local` to park it in a named local stash before shipping.
+
+GitHub CI also runs on pull requests and on every push to `main`, so trunk pushes still get a remote backstop after the local verification step.
+
 ## Philosophy
 
 **Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.

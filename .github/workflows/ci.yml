@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   ci:
@@ -15,11 +17,5 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Format check
-        run: npm run format:check
-
-      - name: Typecheck
-        run: npx tsc --noEmit
-
-      - name: Tests
-        run: npx vitest run
+      - name: Verify
+        run: npm run verify
