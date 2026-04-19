@@ -103,10 +103,28 @@ function applyExplicitContainerEnv(
   // Idea Maze worker, so OneCLI's generic header injection cannot satisfy it.
   // Keep the raw key exposure as narrow as possible and pass through only this
   // one optional variable from the host environment.
-  const envConfig = readEnvFile(['TAVILY_API_KEY']);
+  const envConfig = readEnvFile([
+    'IDEA_MAZE_ARTIFACTS_REPO_BRANCH',
+    'IDEA_MAZE_ARTIFACTS_REPO_URL',
+    'TAVILY_API_KEY',
+  ]);
   const tavilyApiKey = process.env.TAVILY_API_KEY || envConfig.TAVILY_API_KEY;
   if (tavilyApiKey) {
     args.push('-e', `TAVILY_API_KEY=${tavilyApiKey}`);
+  }
+
+  const artifactsRepoUrl =
+    process.env.IDEA_MAZE_ARTIFACTS_REPO_URL ||
+    envConfig.IDEA_MAZE_ARTIFACTS_REPO_URL;
+  if (artifactsRepoUrl) {
+    args.push('-e', `IDEA_MAZE_ARTIFACTS_REPO_URL=${artifactsRepoUrl}`);
+  }
+
+  const artifactsRepoBranch =
+    process.env.IDEA_MAZE_ARTIFACTS_REPO_BRANCH ||
+    envConfig.IDEA_MAZE_ARTIFACTS_REPO_BRANCH;
+  if (artifactsRepoBranch) {
+    args.push('-e', `IDEA_MAZE_ARTIFACTS_REPO_BRANCH=${artifactsRepoBranch}`);
   }
 }
 

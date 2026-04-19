@@ -36,9 +36,11 @@ const THIRD_GROUP: RegisteredGroup = {
 
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
+let exportRequests: string[];
 
 beforeEach(() => {
   _initTestDatabase();
+  exportRequests = [];
 
   groups = {
     'main@g.us': MAIN_GROUP,
@@ -62,6 +64,9 @@ beforeEach(() => {
     syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
+    onArtifactExportRequested: (groupFolder) => {
+      exportRequests.push(groupFolder);
+    },
     onTasksChanged: () => {},
   };
 });
@@ -675,5 +680,21 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+describe('artifact_export IPC', () => {
+  it('requests a host-side artifact export drain for the source group', async () => {
+    await processTaskIpc(
+      {
+        type: 'artifact_export',
+        artifactId: 42,
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(exportRequests).toEqual(['other-group']);
   });
 });

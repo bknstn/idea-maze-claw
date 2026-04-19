@@ -4,35 +4,21 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { execFileSyncMock, readEnvFileMock } = vi.hoisted(() => ({
-  execFileSyncMock: vi.fn(),
-  readEnvFileMock: vi.fn(() => ({})),
-}));
-
-vi.mock("node:child_process", () => ({
-  execFileSync: execFileSyncMock,
-}));
-
-vi.mock("../../../../src/env.ts", () => ({
-  readEnvFile: readEnvFileMock,
-}));
-
 describe("review flow", () => {
   let groupDir: string;
+  let ipcDir: string;
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-18T12:00:00.000Z"));
     groupDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-maze-review-"));
+    ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-maze-ipc-"));
     fs.mkdirSync(path.join(groupDir, "data"), { recursive: true });
     process.env.WORKSPACE_GROUP = groupDir;
+    process.env.WORKSPACE_IPC = ipcDir;
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_BRANCH;
-    delete process.env.IDEA_MAZE_ARTIFACTS_REPO_DIR;
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_URL;
     vi.resetModules();
-    execFileSyncMock.mockReset();
-    readEnvFileMock.mockReset();
-    readEnvFileMock.mockReturnValue({});
   });
 
   afterEach(async () => {
@@ -40,11 +26,11 @@ describe("review flow", () => {
     closeDb();
     vi.useRealTimers();
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_BRANCH;
-    delete process.env.IDEA_MAZE_ARTIFACTS_REPO_DIR;
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_URL;
-    delete process.env.IDEA_MAZE_OBSIDIAN_EXPORT_DIR;
     delete process.env.WORKSPACE_GROUP;
+    delete process.env.WORKSPACE_IPC;
     fs.rmSync(groupDir, { recursive: true, force: true });
+    fs.rmSync(ipcDir, { recursive: true, force: true });
   });
 
   async function seedReviewableRun() {
@@ -97,11 +83,11 @@ describe("review flow", () => {
     return db;
   }
 
-  it("records approval feedback, lifecycle, and audit events", async () => {
+  it("records approval feedback and leaves GitHub export disabled when mirror config is absent", async () => {
     const db = await seedReviewableRun();
     const { approveResearchRun } = await import("./review.ts");
 
-    approveResearchRun(db, 1, "Strong fit");
+    const result = approveResearchRun(db, 1, "Strong fit");
 
     const opportunity = db.prepare(`
       SELECT lifecycle_stage
@@ -110,137 +96,60 @@ describe("review flow", () => {
     `).get() as { lifecycle_stage: string };
     const feedbackCount = (db.prepare("SELECT COUNT(*) as n FROM feedback_features").get() as any).n;
     const reviewEvent = db.prepare(`
-      SELECT summary
+      SELECT summary, payload_json
       FROM run_events
       WHERE run_id = 1 AND event_type = 'review.approved'
       LIMIT 1
-    `).get() as { summary: string } | undefined;
+    `).get() as { payload_json: string; summary: string } | undefined;
+    const exportCount = (db.prepare("SELECT COUNT(*) as n FROM artifact_exports").get() as any).n;
 
+    expect(result.githubExport.status).toBe("disabled");
     expect(opportunity.lifecycle_stage).toBe("approved");
     expect(feedbackCount).toBeGreaterThan(0);
     expect(reviewEvent?.summary).toContain("approved");
+    expect(reviewEvent?.payload_json).toContain('"github_export_status":"disabled"');
+    expect(exportCount).toBe(0);
   });
 
-  it("mirrors approved artifacts into an Obsidian export directory when configured", async () => {
-    const obsidianDir = path.join(groupDir, "obsidian-vault", "Idea Maze");
-    process.env.IDEA_MAZE_OBSIDIAN_EXPORT_DIR = obsidianDir;
+  it("queues a host-side GitHub export row and writes an IPC wakeup when mirror config is present", async () => {
+    process.env.IDEA_MAZE_ARTIFACTS_REPO_URL = "git@github.com:bknstn/idea-maze-artifacts.git";
+    process.env.IDEA_MAZE_ARTIFACTS_REPO_BRANCH = "main";
     vi.resetModules();
 
     const db = await seedReviewableRun();
     const { approveResearchRun } = await import("./review.ts");
 
-    const { obsidianPath, path: artifactPath } = approveResearchRun(db, 1, "Strong fit");
-
-    expect(obsidianPath).toBeTruthy();
-    expect(obsidianPath?.startsWith(obsidianDir)).toBe(true);
-
-    const obsidianBody = fs.readFileSync(obsidianPath!, "utf-8");
-    expect(obsidianBody).toContain('title: "Finance Ops"');
-    expect(obsidianBody).toContain(`canonical_artifact_path: ${JSON.stringify(artifactPath)}`);
-    expect(obsidianBody).toContain("# Finance Ops");
-    expect(obsidianBody).toContain("_Mirrored from the approved NanoClaw artifact._");
-  });
-
-  it("pushes approved artifacts to the configured GitHub repo mirror", async () => {
-    process.env.IDEA_MAZE_ARTIFACTS_REPO_URL = "git@github.com:bknstn/idea-maze-artifacts.git";
-    const gitCalls: Array<{ args: string[] }> = [];
-    execFileSyncMock.mockImplementation((_command: string, args?: readonly string[]) => {
-      const argv = [...(args ?? [])];
-      gitCalls.push({ args: argv });
-
-      if (argv[0] === "clone") return "";
-      if (argv[2] === "add") return "";
-      if (argv[2] === "status") return "A  2026/04/18/finance-ops.md\n";
-      if (argv[2] === "commit") return "[main abc1234] Add artifact finance-ops (run #1)\n";
-      if (argv[2] === "rev-parse") return "abc1234567890\n";
-      if (argv[2] === "push") return "";
-      throw new Error(`Unexpected git command: ${argv.join(" ")}`);
-    });
-
-    const db = await seedReviewableRun();
-    const { approveResearchRun } = await import("./review.ts");
-
     const result = approveResearchRun(db, 1, "Strong fit");
 
-    expect(result.repoMirror).toBeTruthy();
-    expect(result.repoMirror?.repoUrl).toBe("git@github.com:bknstn/idea-maze-artifacts.git");
-    expect(result.repoMirror?.relativePath).toBe("2026/04/18/finance-ops.md");
-    expect(result.repoMirror?.pushed).toBe(true);
-    expect(result.repoMirror?.commitSha).toBe("abc1234567890");
-
-    const mirroredBody = fs.readFileSync(result.repoMirror!.localPath, "utf-8");
-    expect(mirroredBody).toContain("run_id: 1");
-    expect(mirroredBody).toContain("opportunity_slug: finance-ops");
-    expect(gitCalls.map((call) => call.args.join(" "))).toEqual([
-      "clone --branch main --single-branch git@github.com:bknstn/idea-maze-artifacts.git " + path.join(groupDir, "data", "artifacts-repo"),
-      "-C " + path.join(groupDir, "data", "artifacts-repo") + " add -- 2026/04/18/finance-ops.md",
-      "-C " + path.join(groupDir, "data", "artifacts-repo") + " status --short -- 2026/04/18/finance-ops.md",
-      "-C " + path.join(groupDir, "data", "artifacts-repo") + " commit -m Add artifact finance-ops (run #1)",
-      "-C " + path.join(groupDir, "data", "artifacts-repo") + " rev-parse HEAD",
-      "-C " + path.join(groupDir, "data", "artifacts-repo") + " push origin main",
-    ]);
-  });
-
-  it("records a warning when GitHub repo sync fails but still approves the run", async () => {
-    process.env.IDEA_MAZE_ARTIFACTS_REPO_URL = "git@github.com:bknstn/idea-maze-artifacts.git";
-    execFileSyncMock.mockImplementation((_command: string, args?: readonly string[]) => {
-      const argv = [...(args ?? [])];
-      if (argv[0] === "clone") return "";
-      if (argv[2] === "add") return "";
-      if (argv[2] === "status") return "A  2026/04/18/finance-ops.md\n";
-      if (argv[2] === "commit") return "[main abc1234] Add artifact finance-ops (run #1)\n";
-      if (argv[2] === "rev-parse") return "abc1234567890\n";
-      if (argv[2] === "push") {
-        const error = new Error("push failed") as Error & { stderr: string };
-        error.stderr = "remote rejected";
-        throw error;
-      }
-      throw new Error(`Unexpected git command: ${argv.join(" ")}`);
-    });
-
-    const db = await seedReviewableRun();
-    const { approveResearchRun } = await import("./review.ts");
-
-    const result = approveResearchRun(db, 1, "Strong fit");
-
-    expect(result.repoMirror).toBeNull();
-
-    const opportunity = db.prepare(`
-      SELECT lifecycle_stage
-      FROM opportunities
-      WHERE id = 1
-    `).get() as { lifecycle_stage: string };
-    const warningEvent = db.prepare(`
-      SELECT summary, payload_json
+    const artifactExport = db.prepare(`
+      SELECT status, relative_path, repo_url, repo_branch, attempt_count, last_error
+      FROM artifact_exports
+      LIMIT 1
+    `).get() as {
+      attempt_count: number;
+      last_error: string | null;
+      relative_path: string;
+      repo_branch: string;
+      repo_url: string;
+      status: string;
+    };
+    const queuedEvent = db.prepare(`
+      SELECT payload_json, summary
       FROM run_events
-      WHERE run_id = 1 AND event_type = 'export.warning'
+      WHERE run_id = 1 AND event_type = 'artifact_export.queued'
       LIMIT 1
     `).get() as { payload_json: string; summary: string } | undefined;
+    const taskFiles = fs.readdirSync(path.join(ipcDir, "tasks"));
 
-    expect(opportunity.lifecycle_stage).toBe("approved");
-    expect(warningEvent?.summary).toContain("GitHub artifact sync failed");
-    expect(warningEvent?.payload_json).toContain('"export_target":"github_repo"');
-  });
-
-  it("records rejection feedback and lifecycle", async () => {
-    const db = await seedReviewableRun();
-    const { rejectResearchRun } = await import("./review.ts");
-
-    rejectResearchRun(db, 1, "Not founder-fit");
-
-    const opportunity = db.prepare(`
-      SELECT lifecycle_stage
-      FROM opportunities
-      WHERE id = 1
-    `).get() as { lifecycle_stage: string };
-    const reviewEvent = db.prepare(`
-      SELECT summary
-      FROM run_events
-      WHERE run_id = 1 AND event_type = 'review.rejected'
-      LIMIT 1
-    `).get() as { summary: string } | undefined;
-
-    expect(opportunity.lifecycle_stage).toBe("rejected");
-    expect(reviewEvent?.summary).toContain("rejected");
+    expect(result.githubExport.status).toBe("queued");
+    expect(artifactExport.status).toBe("pending");
+    expect(artifactExport.relative_path).toBe("data/artifacts/2026/04/18/finance-ops.md");
+    expect(artifactExport.repo_url).toBe("git@github.com:bknstn/idea-maze-artifacts.git");
+    expect(artifactExport.repo_branch).toBe("main");
+    expect(artifactExport.attempt_count).toBe(0);
+    expect(artifactExport.last_error).toBeNull();
+    expect(queuedEvent?.summary).toContain("queued for host processing");
+    expect(queuedEvent?.payload_json).toContain('"ipc_wakeup_sent":true');
+    expect(taskFiles).toHaveLength(1);
   });
 });

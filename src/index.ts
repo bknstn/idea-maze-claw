@@ -53,6 +53,10 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import {
+  requestIdeaMazeArtifactExportDrain,
+  startIdeaMazeArtifactExporter,
+} from './idea-maze-artifact-exporter.js';
 import { resolvePendingInput } from './intent-classifier.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -799,6 +803,7 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
   });
+  startIdeaMazeArtifactExporter();
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
@@ -820,6 +825,9 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    onArtifactExportRequested: (groupFolder) => {
+      requestIdeaMazeArtifactExportDrain('ipc', groupFolder);
+    },
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({

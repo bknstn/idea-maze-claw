@@ -22,6 +22,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  onArtifactExportRequested?: (groupFolder: string) => void;
   onTasksChanged: () => void;
 }
 
@@ -158,6 +159,7 @@ export async function processTaskIpc(
   data: {
     type: string;
     taskId?: string;
+    artifactId?: number;
     prompt?: string;
     schedule_type?: string;
     schedule_value?: string;
@@ -398,6 +400,14 @@ export async function processTaskIpc(
         );
         deps.onTasksChanged();
       }
+      break;
+
+    case 'artifact_export':
+      logger.info(
+        { artifactId: data.artifactId, sourceGroup },
+        'Artifact export requested via IPC',
+      );
+      deps.onArtifactExportRequested?.(sourceGroup);
       break;
 
     case 'refresh_groups':

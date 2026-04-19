@@ -31,7 +31,12 @@ vi.mock('./logger.js', () => ({
 }));
 
 vi.mock('./env.js', () => ({
-  readEnvFile: vi.fn(() => ({ TAVILY_API_KEY: 'tvly-test-key' })),
+  readEnvFile: vi.fn(() => ({
+    IDEA_MAZE_ARTIFACTS_REPO_BRANCH: 'main',
+    IDEA_MAZE_ARTIFACTS_REPO_URL:
+      'git@github.com:bknstn/idea-maze-artifacts.git',
+    TAVILY_API_KEY: 'tvly-test-key',
+  })),
 }));
 
 // Mock fs
@@ -254,7 +259,7 @@ describe('container-runner timeout behavior', () => {
     expect(result.newSessionId).toBe('session-456');
   });
 
-  it('passes through TAVILY_API_KEY to the Idea Maze container only', async () => {
+  it('passes through Idea Maze-specific env to the Idea Maze container only', async () => {
     const resultPromise = runContainerAgent(
       ideaMazeGroup,
       ideaMazeInput,
@@ -277,6 +282,10 @@ describe('container-runner timeout behavior', () => {
 
     expect(containerArgs).toContain('-e');
     expect(containerArgs).toContain('TAVILY_API_KEY=tvly-test-key');
+    expect(containerArgs).toContain(
+      'IDEA_MAZE_ARTIFACTS_REPO_URL=git@github.com:bknstn/idea-maze-artifacts.git',
+    );
+    expect(containerArgs).toContain('IDEA_MAZE_ARTIFACTS_REPO_BRANCH=main');
   });
 
   it('does not pass TAVILY_API_KEY to non-Idea Maze containers', async () => {
@@ -301,6 +310,10 @@ describe('container-runner timeout behavior', () => {
     const containerArgs = spawnMock.mock.calls.at(-1)?.[1] ?? [];
 
     expect(containerArgs).not.toContain('TAVILY_API_KEY=tvly-test-key');
+    expect(containerArgs).not.toContain(
+      'IDEA_MAZE_ARTIFACTS_REPO_URL=git@github.com:bknstn/idea-maze-artifacts.git',
+    );
+    expect(containerArgs).not.toContain('IDEA_MAZE_ARTIFACTS_REPO_BRANCH=main');
   });
 
   it('redacts env values from logged container args', async () => {

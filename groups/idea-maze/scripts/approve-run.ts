@@ -21,17 +21,14 @@ function main() {
   const db = getDb();
   initSchema(db);
   try {
-    const { obsidianPath, path, repoMirror } = approveResearchRun(db, runId, notes);
+    const { githubExport, path } = approveResearchRun(db, runId, notes);
     console.log(`Run #${runId} approved.`);
     console.log(`Artifact written: ${path}`);
-    if (repoMirror?.pushed) {
-      console.log(
-        `GitHub mirror pushed: ${repoMirror.repoUrl} (${repoMirror.relativePath} @ ${repoMirror.commitSha?.slice(0, 7)})`,
-      );
-    } else if (repoMirror) {
-      console.log(`GitHub mirror unchanged: ${repoMirror.repoUrl} (${repoMirror.relativePath})`);
+    if (githubExport.status === "queued") {
+      console.log("GitHub export queued for host-side processing.");
+    } else {
+      console.log("GitHub export disabled: IDEA_MAZE_ARTIFACTS_REPO_URL is not configured.");
     }
-    if (obsidianPath) console.log(`Obsidian export written: ${obsidianPath}`);
     if (notes) console.log(`Notes: ${notes}`);
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
