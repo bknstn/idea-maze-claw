@@ -21,6 +21,8 @@ describe("review flow", () => {
   let groupDir: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-18T12:00:00.000Z"));
     groupDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-maze-review-"));
     fs.mkdirSync(path.join(groupDir, "data"), { recursive: true });
     process.env.WORKSPACE_GROUP = groupDir;
@@ -36,6 +38,7 @@ describe("review flow", () => {
   afterEach(async () => {
     const { closeDb } = await import("./db.ts");
     closeDb();
+    vi.useRealTimers();
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_BRANCH;
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_DIR;
     delete process.env.IDEA_MAZE_ARTIFACTS_REPO_URL;
