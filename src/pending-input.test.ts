@@ -101,6 +101,12 @@ describe('classifyPendingInput', () => {
       source: 'user',
       kind: 'workflow_reply',
     });
+    expect(
+      classifyPendingInput([makeMessage('clear the queue')], 'Idea Maze'),
+    ).toEqual({
+      source: 'user',
+      kind: 'workflow_reply',
+    });
   });
 
   it('classifies non-trivial replies to the assistant as workflow replies', () => {

@@ -43,7 +43,7 @@ const SUBSTANTIVE_FOLLOW_UP_PATTERNS = [
 ];
 
 const IMPERATIVE_FOLLOW_UP_PATTERNS = [
-  /^(?:filter|mark|remove|delete|drop|keep|set|update|change|move|skip|pick|select|choose|sort|group|rerank|rerun|retry|process|research|analyze|review|investigate|continue)\b/i,
+  /^(?:filter|mark|remove|delete|drop|keep|set|update|change|move|skip|pick|select|choose|sort|group|rerank|rerun|retry|process|research|analyze|review|investigate|continue|clear|cancel|stop|abort|reset|flush)\b/i,
 ];
 
 function normalizeName(name?: string | null): string {
