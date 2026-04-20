@@ -10,7 +10,6 @@ import { logger } from './logger.js';
 
 const IDEA_MAZE_GROUP_FOLDER = 'idea-maze';
 const ARTIFACT_SOURCE_PREFIX = 'data/artifacts/';
-const DEFAULT_BACKFILL_DATE = '2026-04-19';
 const FAILED_RETRY_DELAY_MS = 15 * 60 * 1000;
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_RUNNING_MS = 10 * 60 * 1000;
@@ -71,6 +70,15 @@ function runGitCommand(args: string[], cwd?: string): string {
   }).trim();
 }
 
+function hasVerifiedHead(cwd: string): boolean {
+  try {
+    runGitCommand(['rev-parse', '--verify', 'HEAD'], cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function loadMirrorConfig(): MirrorConfig | null {
   const envConfig = readEnvFile([
     'IDEA_MAZE_ARTIFACTS_REPO_BRANCH',
@@ -123,6 +131,30 @@ function ensureArtifactExportsSchema(db: Database.Database): void {
       ON artifact_exports(updated_at_utc);
     CREATE INDEX IF NOT EXISTS ix_artifact_exports_last_attempt_at_utc
       ON artifact_exports(last_attempt_at_utc);
+
+    CREATE TABLE IF NOT EXISTS run_events (
+      id              INTEGER PRIMARY KEY,
+      run_id          INTEGER REFERENCES runs(id) ON DELETE CASCADE,
+      opportunity_id  INTEGER REFERENCES opportunities(id) ON DELETE CASCADE,
+      event_type      TEXT    NOT NULL,
+      stage           TEXT,
+      actor           TEXT    NOT NULL DEFAULT 'system',
+      status          TEXT    NOT NULL DEFAULT 'info',
+      summary         TEXT    NOT NULL,
+      payload_json    TEXT    NOT NULL DEFAULT '{}',
+      created_at_utc  TEXT    NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS ix_run_events_run_id
+      ON run_events(run_id);
+    CREATE INDEX IF NOT EXISTS ix_run_events_opportunity_id
+      ON run_events(opportunity_id);
+    CREATE INDEX IF NOT EXISTS ix_run_events_stage
+      ON run_events(stage);
+    CREATE INDEX IF NOT EXISTS ix_run_events_status
+      ON run_events(status);
+    CREATE INDEX IF NOT EXISTS ix_run_events_created_at_utc
+      ON run_events(created_at_utc);
   `);
 }
 
@@ -250,6 +282,12 @@ function ensureMirrorCheckout(config: MirrorConfig): void {
   }
 
   runGitCommand(['fetch', 'origin', config.repoBranch], config.repoDir);
+  if (!hasVerifiedHead(config.repoDir)) {
+    runGitCommand(
+      ['checkout', '-B', config.repoBranch, `origin/${config.repoBranch}`],
+      config.repoDir,
+    );
+  }
   const [behindStr, aheadStr] = runGitCommand(
     [
       'rev-list',
@@ -580,11 +618,11 @@ export function queueIdeaMazeArtifactExportBackfill(
     return 0;
   }
 
-  const date = options.date ?? DEFAULT_BACKFILL_DATE;
   const now = options.now ?? new Date();
   const nowIso = now.toISOString();
-  const startIso = `${date}T00:00:00.000Z`;
-  const endIso = `${nextUtcDate(date)}T00:00:00.000Z`;
+  const date = options.date;
+  const startIso = date ? `${date}T00:00:00.000Z` : null;
+  const endIso = date ? `${nextUtcDate(date)}T00:00:00.000Z` : null;
 
   try {
     const rows = db
@@ -599,12 +637,12 @@ export function queueIdeaMazeArtifactExportBackfill(
       FROM artifacts a
       LEFT JOIN artifact_exports ae ON ae.artifact_id = a.id
       WHERE ae.id IS NULL
-        AND COALESCE(a.approved_at_utc, a.created_at_utc) >= ?
-        AND COALESCE(a.approved_at_utc, a.created_at_utc) < ?
+        AND (? IS NULL OR COALESCE(a.approved_at_utc, a.created_at_utc) >= ?)
+        AND (? IS NULL OR COALESCE(a.approved_at_utc, a.created_at_utc) < ?)
       ORDER BY COALESCE(a.approved_at_utc, a.created_at_utc) ASC, a.id ASC
     `,
       )
-      .all(startIso, endIso) as BackfillArtifactRow[];
+      .all(startIso, startIso, endIso, endIso) as BackfillArtifactRow[];
 
     const insertExport = db.prepare(`
       INSERT INTO artifact_exports (
@@ -643,7 +681,7 @@ export function queueIdeaMazeArtifactExportBackfill(
             opportunityId: row.opportunity_id,
             payload: {
               artifact_id: row.artifact_id,
-              backfill_date: date,
+              backfill_date: date ?? 'all',
               ipc_wakeup_sent: false,
               relative_path: relativePath,
               repo_branch: config.repoBranch,

@@ -130,6 +130,12 @@ function seedGitRemote(remoteDir: string, seedDir: string): void {
   git(['push', '-u', 'origin', 'main'], seedDir);
 }
 
+function initUnbornCheckout(repoDir: string, remoteDir: string): void {
+  fs.mkdirSync(repoDir, { recursive: true });
+  git(['init', '--initial-branch=main'], repoDir);
+  git(['remote', 'add', 'origin', remoteDir], repoDir);
+}
+
 describe('Idea Maze artifact exporter', () => {
   let artifactExporter:
     | typeof import('./idea-maze-artifact-exporter.js')
@@ -393,7 +399,223 @@ describe('Idea Maze artifact exporter', () => {
     inspectDb.close();
   });
 
-  it('queues only missing April 19 backfill rows and skips already-exported artifacts', async () => {
+  it('bootstraps an existing unborn mirror checkout before exporting rows', async () => {
+    const db = initIdeaMazeDb(groupDir);
+    const dbPath = path.join(groupDir, 'data', 'lab.db');
+    const artifactRelativePath = 'data/artifacts/2026/04/19/unborn.md';
+    const artifactAbsolutePath = path.join(
+      groupDir,
+      ...artifactRelativePath.split('/'),
+    );
+
+    initUnbornCheckout(mirrorCheckoutDir, remoteRepoDir);
+    fs.mkdirSync(path.dirname(artifactAbsolutePath), { recursive: true });
+    fs.writeFileSync(artifactAbsolutePath, 'unborn checkout\n', 'utf-8');
+
+    db.prepare(
+      `
+      INSERT INTO opportunities (
+        id, slug, title, thesis, score, market_score, final_score, status, lifecycle_stage, cluster_key, metadata_json, created_at_utc, updated_at_utc
+      )
+      VALUES (1, 'unborn', 'Unborn', 'Seed mirror checkout', 8, 8, 8, 'active', 'approved', 'unborn', '{}', '2026-04-19T07:00:00.000Z', '2026-04-19T07:00:00.000Z')
+    `,
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO runs (id, run_type, target_type, target_id, status, requested_by, started_at_utc, completed_at_utc, metadata_json)
+      VALUES (1, 'research', 'opportunity', '1', 'approved', 'system', '2026-04-19T07:00:00.000Z', '2026-04-19T07:03:00.000Z', '{}')
+    `,
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO artifacts (id, opportunity_id, run_id, path, version, approved_at_utc, created_at_utc)
+      VALUES (1, 1, 1, ?, 1, '2026-04-19T07:03:00.000Z', '2026-04-19T07:03:00.000Z')
+    `,
+    ).run(artifactAbsolutePath);
+    db.prepare(
+      `
+      INSERT INTO artifact_exports (
+        artifact_id, status, relative_path, repo_url, repo_branch, attempt_count, last_attempt_at_utc, commit_sha, last_error, created_at_utc, updated_at_utc
+      )
+      VALUES (1, 'pending', ?, ?, 'main', 0, NULL, NULL, NULL, '2026-04-19T07:03:00.000Z', '2026-04-19T07:03:00.000Z')
+    `,
+    ).run(artifactRelativePath, remoteRepoDir);
+    db.close();
+
+    await artifactExporter!.drainIdeaMazeArtifactExports({
+      now: new Date('2026-04-19T08:00:00.000Z'),
+      source: 'startup',
+    });
+
+    const inspectDb = new Database(dbPath);
+    const exportRow = inspectDb
+      .prepare(
+        `
+      SELECT status, commit_sha, last_error
+      FROM artifact_exports
+      WHERE artifact_id = 1
+    `,
+      )
+      .get() as {
+      commit_sha: string | null;
+      last_error: string | null;
+      status: string;
+    };
+    inspectDb.close();
+
+    const inspectDir = path.join(rootDir, 'inspect-unborn');
+    git(['clone', remoteRepoDir, inspectDir]);
+    const mirroredBody = fs.readFileSync(
+      path.join(inspectDir, '2026', '04', '19', 'unborn.md'),
+      'utf-8',
+    );
+
+    expect(exportRow.status).toBe('succeeded');
+    expect(exportRow.commit_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(exportRow.last_error).toBeNull();
+    expect(mirroredBody).toBe('unborn checkout\n');
+  });
+
+  it('creates missing export support tables before queueing backfill rows', async () => {
+    const dbPath = path.join(groupDir, 'data', 'lab.db');
+    const db = new Database(dbPath);
+    const artifactPath = path.join(
+      groupDir,
+      'data',
+      'artifacts',
+      '2026',
+      '03',
+      '30',
+      'legacy.md',
+    );
+
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    fs.writeFileSync(artifactPath, 'legacy\n', 'utf-8');
+
+    db.exec(`
+      CREATE TABLE opportunities (
+        id INTEGER PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        thesis TEXT NOT NULL,
+        score REAL NOT NULL DEFAULT 0,
+        market_score REAL NOT NULL DEFAULT 0,
+        final_score REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        lifecycle_stage TEXT NOT NULL DEFAULT 'scored',
+        cluster_key TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at_utc TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL,
+        last_reviewed_at_utc TEXT
+      );
+
+      CREATE TABLE runs (
+        id INTEGER PRIMARY KEY,
+        run_type TEXT NOT NULL,
+        target_type TEXT,
+        target_id TEXT,
+        status TEXT NOT NULL DEFAULT 'queued',
+        requested_by TEXT NOT NULL DEFAULT 'system',
+        started_at_utc TEXT NOT NULL,
+        completed_at_utc TEXT,
+        error TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+      );
+
+      CREATE TABLE artifacts (
+        id INTEGER PRIMARY KEY,
+        opportunity_id INTEGER NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+        run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        approved_at_utc TEXT,
+        created_at_utc TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `
+      INSERT INTO opportunities (
+        id, slug, title, thesis, score, market_score, final_score, status, lifecycle_stage, cluster_key, metadata_json, created_at_utc, updated_at_utc
+      )
+      VALUES (1, 'legacy', 'Legacy', 'legacy', 8, 8, 8, 'active', 'approved', 'legacy', '{}', '2026-03-30T17:52:00.000Z', '2026-03-30T17:52:00.000Z')
+    `,
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO runs (id, run_type, target_type, target_id, status, requested_by, started_at_utc, completed_at_utc, metadata_json)
+      VALUES (1, 'research', 'opportunity', '1', 'approved', 'system', '2026-03-30T17:50:00.000Z', '2026-03-30T17:53:00.000Z', '{}')
+    `,
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO artifacts (id, opportunity_id, run_id, path, version, approved_at_utc, created_at_utc)
+      VALUES (1, 1, 1, ?, 1, '2026-03-30T17:53:00.000Z', '2026-03-30T17:53:00.000Z')
+    `,
+    ).run(artifactPath);
+    db.close();
+
+    const queued = artifactExporter!.queueIdeaMazeArtifactExportBackfill({
+      now: new Date('2026-04-20T08:00:00.000Z'),
+    });
+
+    const inspectDb = new Database(dbPath);
+    const tables = inspectDb
+      .prepare(
+        `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name IN ('artifact_exports', 'run_events')
+      ORDER BY name ASC
+    `,
+      )
+      .all() as Array<{ name: string }>;
+    const exportRows = inspectDb
+      .prepare(
+        `
+      SELECT artifact_id, relative_path, status
+      FROM artifact_exports
+      ORDER BY artifact_id ASC
+    `,
+      )
+      .all() as Array<{
+      artifact_id: number;
+      relative_path: string;
+      status: string;
+    }>;
+    const events = inspectDb
+      .prepare(
+        `
+      SELECT event_type, json_extract(payload_json, '$.backfill_date') AS backfill_date
+      FROM run_events
+      ORDER BY id ASC
+    `,
+      )
+      .all() as Array<{ backfill_date: string; event_type: string }>;
+
+    expect(queued).toBe(1);
+    expect(tables).toEqual([
+      { name: 'artifact_exports' },
+      { name: 'run_events' },
+    ]);
+    expect(exportRows).toEqual([
+      {
+        artifact_id: 1,
+        relative_path: 'data/artifacts/2026/03/30/legacy.md',
+        status: 'pending',
+      },
+    ]);
+    expect(events).toEqual([
+      {
+        backfill_date: 'all',
+        event_type: 'artifact_export.queued',
+      },
+    ]);
+
+    inspectDb.close();
+  });
+
+  it('queues all missing backfill rows by default and skips already-exported artifacts', async () => {
     const db = initIdeaMazeDb(groupDir);
     const dbPath = path.join(groupDir, 'data', 'lab.db');
     const oldArtifactPath = path.join(
@@ -473,7 +695,6 @@ describe('Idea Maze artifact exporter', () => {
     db.close();
 
     const queued = artifactExporter!.queueIdeaMazeArtifactExportBackfill({
-      date: '2026-04-19',
       now: new Date('2026-04-19T08:00:00.000Z'),
     });
 
@@ -492,8 +713,13 @@ describe('Idea Maze artifact exporter', () => {
       status: string;
     }>;
 
-    expect(queued).toBe(1);
+    expect(queued).toBe(2);
     expect(exportRows).toEqual([
+      {
+        artifact_id: 1,
+        relative_path: 'data/artifacts/2026/04/18/old.md',
+        status: 'pending',
+      },
       {
         artifact_id: 2,
         relative_path: 'data/artifacts/2026/04/19/existing.md',
