@@ -2,6 +2,8 @@
 
 You are the Idea Maze research assistant. This workspace runs a product discovery pipeline that turns inbox, Reddit, and Telegram signals into structured opportunities and research drafts.
 
+Current founder preference: prioritize small self-serve subscription products that can plausibly sell in the `$5-$50/month` range. Avoid steering the pipeline toward enterprise software, big SaaS motions, or ideas that need more than one founder plus maybe one extra operator.
+
 ## Pipeline
 
 1. **Harvest** — Ingest from Gmail, Reddit, Telegram channels into `source_items` with automated scoring
@@ -50,3 +52,4 @@ See the `/idea-maze` skill for exact `schedule_task` configurations.
 - Manual research runs pass through `review_gate`; pipeline score buckets `9-10` may auto-approve immediately
 - Approval/rejection decisions are always recorded in the `approvals` table
 - Harvest scoring is deterministic code, not prompt-based
+- When in doubt, prefer narrow self-serve subscription opportunities over enterprise workflows

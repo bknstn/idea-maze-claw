@@ -89,28 +89,29 @@ function buildTemplateDraft(
     evidence_from_telegram: telegram.length ? telegram : ["None"],
     evidence_from_reddit: reddit.length ? reddit : ["None"],
     external_market_check: external.length ? external : ["None"],
-    product_concept: `Build a narrow web app focused on '${opp.cluster_key}' that turns recurring signals into a repeatable workflow.`,
+    product_concept: `Build a narrow self-serve subscription around '${opp.cluster_key}' that one founder can operate without an enterprise sales motion.`,
     mvp_scope: [
       "Capture the narrowest workflow around the detected pain point.",
-      "Provide one opinionated dashboard or automation path.",
-      "Instrument activation and retention from day one.",
+      "Provide one opinionated dashboard or automation path that works end-to-end without services-heavy setup.",
+      "Instrument activation, retention, and willingness to pay from day one.",
     ],
     implementation_plan: [
-      "Define one primary user persona and one dominant job-to-be-done.",
-      "Build the narrowest functional slice that proves repeated usage.",
-      "Ship analytics, feedback capture, and a pricing experiment early.",
+      "Define one primary user persona inside a tiny team or solo-operator workflow.",
+      "Build the narrowest functional slice that proves repeated usage without custom onboarding.",
+      "Ship analytics, feedback capture, and a low-ticket pricing experiment early.",
     ],
     distribution_plan: [
       "Publish the thesis in the communities where the signal originated.",
-      "Use the relevant Telegram, Reddit, or email-derived channel as the first distribution wedge.",
-      "Track response quality and inbound follow-up questions as validation.",
+      "Use the relevant Telegram, Reddit, or email-derived channel as the first self-serve distribution wedge.",
+      "Track trial-to-paid conversion and inbound follow-up questions as validation.",
     ],
     risks: [
       "Signals may reflect noise rather than durable demand.",
       "The market may already have stronger incumbents.",
       "Inbox and channel evidence may over-index on your current network.",
+      "The workflow may drift toward enterprise requirements that break a lean operating model.",
     ],
-    decision_for_human_review: "Approve only if the idea is specific enough to build in one narrow iteration.",
+    decision_for_human_review: "Approve only if the idea is specific enough to build and sell as a narrow self-serve subscription for a one- or two-person team.",
   };
 }
 

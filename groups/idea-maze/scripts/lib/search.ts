@@ -127,11 +127,11 @@ export function buildSearchQueries(
   }
 
   if (queries.length < limit) {
-    add(`${target.cluster_key.replace(/-/g, " ")} alternatives pricing complaints`);
+    add(`${target.cluster_key.replace(/-/g, " ")} self-serve pricing alternatives complaints`);
   }
 
   if (queries.length < limit) {
-    add(`${target.title} market size competitors`);
+    add(`${target.title} monthly subscription competitors`);
   }
 
   return queries.slice(0, limit);

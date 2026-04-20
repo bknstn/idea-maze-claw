@@ -109,4 +109,122 @@ describe("founder-fit scoring", () => {
     expect(reduced.tasteAdjustment).toBeLessThan(boosted.tasteAdjustment);
     expect(reduced.finalScore).toBeLessThan(boosted.finalScore);
   });
+
+  it("boosts opportunities that look like small self-serve subscriptions", async () => {
+    const { getDb } = await import("./db.ts");
+    const { initSchema } = await import("./schema.ts");
+    const { computeTasteForOpportunity } = await import("./taste.ts");
+
+    const db = getDb();
+    initSchema(db);
+
+    db.prepare(`
+      INSERT INTO opportunities (
+        id, slug, title, thesis, score, market_score, final_score, status, lifecycle_stage, cluster_key, metadata_json, created_at_utc, updated_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'shortlisted', ?, '{}', ?, ?)
+    `).run(
+      1,
+      "freelancer-inbox",
+      "Freelancer Inbox",
+      "Freelancers want a $29/month self-serve workflow tool they can start with a credit card.",
+      7.2,
+      7.2,
+      7.2,
+      "freelancer-inbox",
+      "2026-04-15T06:00:00.000Z",
+      "2026-04-15T06:00:00.000Z",
+    );
+    db.prepare(`
+      INSERT INTO source_items (
+        id, source, external_id, text, timestamp_utc, ingested_at_utc, raw_path, content_hash, metadata_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      1,
+      "reddit",
+      "reddit-1",
+      "This needs to be self-serve for freelancers and small businesses. I'd pay $29 per month and buy online without booking a demo.",
+      "2026-04-15T06:00:00.000Z",
+      "2026-04-15T06:00:00.000Z",
+      "/tmp/source-1.json",
+      "hash-1",
+      JSON.stringify({ harvest_signals: ["manual-work"], source_patterns: ["templates-and-ops"] }),
+    );
+    db.prepare(`
+      INSERT INTO insights (id, source_item_id, insight_type, summary, evidence_score, confidence, status, metadata_json, created_at_utc)
+      VALUES (1, 1, 'willingness_to_pay', 'Freelancers would pay a small monthly subscription for a self-serve tool.', 0.9, 0.8, 'new', '{}', '2026-04-15T06:00:00.000Z')
+    `).run();
+    db.prepare(`
+      INSERT INTO opportunity_sources (opportunity_id, source_item_id)
+      VALUES (1, 1)
+    `).run();
+
+    const computed = computeTasteForOpportunity(db, 1, 7.2);
+
+    expect(computed.marketScore).toBe(7.2);
+    expect(computed.preferenceAdjustment).toBeGreaterThan(0);
+    expect(computed.tasteAdjustment).toBeGreaterThan(0);
+    expect(computed.finalScore).toBeGreaterThan(7.2);
+    expect(computed.preferenceSignals.map((signal) => signal.signal)).toContain("low_ticket_subscription");
+  });
+
+  it("penalizes enterprise-heavy opportunities before they reach review", async () => {
+    const { getDb } = await import("./db.ts");
+    const { initSchema } = await import("./schema.ts");
+    const { computeTasteForOpportunity } = await import("./taste.ts");
+
+    const db = getDb();
+    initSchema(db);
+
+    db.prepare(`
+      INSERT INTO opportunities (
+        id, slug, title, thesis, score, market_score, final_score, status, lifecycle_stage, cluster_key, metadata_json, created_at_utc, updated_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'shortlisted', ?, '{}', ?, ?)
+    `).run(
+      1,
+      "enterprise-governance",
+      "Enterprise Governance",
+      "This likely needs SSO, procurement approval, and a sales-led rollout.",
+      7.8,
+      7.8,
+      7.8,
+      "enterprise-governance",
+      "2026-04-15T06:00:00.000Z",
+      "2026-04-15T06:00:00.000Z",
+    );
+    db.prepare(`
+      INSERT INTO source_items (
+        id, source, external_id, text, timestamp_utc, ingested_at_utc, raw_path, content_hash, metadata_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      1,
+      "reddit",
+      "reddit-1",
+      "Buyers expect enterprise security review, SOC 2, SAML, customer success, professional services, and a book-a-demo flow with annual contracts.",
+      "2026-04-15T06:00:00.000Z",
+      "2026-04-15T06:00:00.000Z",
+      "/tmp/source-1.json",
+      "hash-1",
+      JSON.stringify({ harvest_signals: ["workflow-context"], source_patterns: ["support-workflow"] }),
+    );
+    db.prepare(`
+      INSERT INTO insights (id, source_item_id, insight_type, summary, evidence_score, confidence, status, metadata_json, created_at_utc)
+      VALUES (1, 1, 'implementation_constraint', 'The opportunity depends on enterprise rollout requirements.', 0.9, 0.8, 'new', '{}', '2026-04-15T06:00:00.000Z')
+    `).run();
+    db.prepare(`
+      INSERT INTO opportunity_sources (opportunity_id, source_item_id)
+      VALUES (1, 1)
+    `).run();
+
+    const computed = computeTasteForOpportunity(db, 1, 7.8);
+
+    expect(computed.marketScore).toBe(7.8);
+    expect(computed.preferenceAdjustment).toBeLessThan(0);
+    expect(computed.tasteAdjustment).toBeLessThan(0);
+    expect(computed.finalScore).toBeLessThan(7.8);
+    expect(computed.preferenceSignals.map((signal) => signal.signal)).toContain("enterprise_sales_motion");
+  });
 });

@@ -29,6 +29,7 @@ describe("buildSearchQueries", () => {
     );
 
     expect(queries[0]).toBe("Invoice Reconciliation");
+    expect(queries[1]).toContain("self-serve");
     expect(queries[1]).toContain("alternatives");
     expect(queries[1]).toContain("invoice-reconciliation".replace(/-/g, " "));
   });

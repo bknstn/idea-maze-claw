@@ -28,11 +28,82 @@ export interface MatchedTasteFeature {
 
 export interface TasteComputation {
   finalScore: number;
+  learnedAdjustment: number;
   marketScore: number;
   matchedFeatures: MatchedTasteFeature[];
+  preferenceAdjustment: number;
+  preferenceSignals: Array<{
+    matchedTerms: string[];
+    score: number;
+    signal: string;
+  }>;
   tasteAdjustment: number;
   typeScores: Record<FeatureType, number>;
 }
+
+interface FounderPreferenceRule {
+  maxMagnitude: number;
+  perMatch: number;
+  signal: string;
+  terms: string[];
+}
+
+const FOUNDER_PREFERENCE_RULES: FounderPreferenceRule[] = [
+  {
+    signal: "low_ticket_subscription",
+    perMatch: 0.18,
+    maxMagnitude: 0.55,
+    terms: [
+      "$5", "$9", "$10", "$15", "$19", "$20", "$25", "$29", "$30", "$39", "$49", "$50",
+      "subscription", "subscription app", "monthly plan", "monthly subscription", "per month", "/month",
+    ],
+  },
+  {
+    signal: "self_serve_distribution",
+    perMatch: 0.15,
+    maxMagnitude: 0.45,
+    terms: [
+      "buy online", "checkout", "credit card", "instant setup", "no demo", "no sales call",
+      "self serve", "self-serve", "sign up and pay", "start trial",
+    ],
+  },
+  {
+    signal: "small_operator_buyer",
+    perMatch: 0.12,
+    maxMagnitude: 0.35,
+    terms: [
+      "agency owner", "consultant", "creator", "freelancer", "indie hacker", "micro business",
+      "one-person", "small business", "solo founder", "tiny team", "two-person",
+    ],
+  },
+  {
+    signal: "enterprise_sales_motion",
+    perMatch: -0.22,
+    maxMagnitude: 0.88,
+    terms: [
+      "annual contract", "book a demo", "book demo", "contact sales", "custom quote", "enterprise",
+      "enterprise-grade", "fortune 500", "legal review", "procurement", "sales led", "sales-led",
+      "security review", "vendor review",
+    ],
+  },
+  {
+    signal: "compliance_heavy_scope",
+    perMatch: -0.18,
+    maxMagnitude: 0.54,
+    terms: [
+      "okta", "saml", "scim", "soc 2", "soc2", "vendor questionnaire",
+    ],
+  },
+  {
+    signal: "high_touch_delivery",
+    perMatch: -0.16,
+    maxMagnitude: 0.48,
+    terms: [
+      "account executive", "account manager", "customer success", "dedicated support",
+      "implementation", "onboarding team", "professional services", "solution engineer", "white glove",
+    ],
+  },
+];
 
 function normalizeFeatureValue(value: string | null | undefined): string | null {
   const normalized = value?.trim().toLowerCase();
@@ -50,6 +121,13 @@ function round2(value: number): number {
 function mean(values: number[]): number {
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildBoundedRuleScore(matchCount: number, perMatch: number, maxMagnitude: number): number {
+  if (!matchCount) return 0;
+  const raw = matchCount * perMatch;
+  if (raw > 0) return round2(Math.min(maxMagnitude, raw));
+  return round2(Math.max(-maxMagnitude, raw));
 }
 
 function toSnapshot(record: Record<string, string[]>): OpportunityFeatureSnapshot {
@@ -125,6 +203,81 @@ function collectFeatureValues(snapshot: OpportunityFeatureSnapshot): Array<{
     }
   }
   return entries;
+}
+
+function buildOpportunityHaystack(
+  db: Database.Database,
+  opportunityId: number,
+): string {
+  const opportunity = db.prepare(`
+    SELECT title, thesis, cluster_key
+    FROM opportunities
+    WHERE id = ?
+  `).get(opportunityId) as {
+    cluster_key: string;
+    thesis: string | null;
+    title: string | null;
+  } | undefined;
+  if (!opportunity) {
+    throw new Error(`Opportunity #${opportunityId} not found.`);
+  }
+
+  const sourceRows = db.prepare(`
+    SELECT si.author, si.canonical_url, si.channel_or_label, si.title, si.text
+    FROM source_items si
+    JOIN opportunity_sources os ON os.source_item_id = si.id
+    WHERE os.opportunity_id = ?
+  `).all(opportunityId) as Array<{
+    author: string | null;
+    canonical_url: string | null;
+    channel_or_label: string | null;
+    text: string | null;
+    title: string | null;
+  }>;
+
+  return [
+    opportunity.title ?? "",
+    opportunity.thesis ?? "",
+    opportunity.cluster_key.replace(/-/g, " "),
+    ...sourceRows.flatMap((row) => [
+      row.author ?? "",
+      row.canonical_url ?? "",
+      row.channel_or_label ?? "",
+      row.title ?? "",
+      row.text ?? "",
+    ]),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+}
+
+function computeFounderPreferenceAdjustment(
+  db: Database.Database,
+  opportunityId: number,
+): {
+  adjustment: number;
+  signals: Array<{
+    matchedTerms: string[];
+    score: number;
+    signal: string;
+  }>;
+} {
+  const haystack = buildOpportunityHaystack(db, opportunityId);
+  const signals = FOUNDER_PREFERENCE_RULES.flatMap((rule) => {
+    const matchedTerms = rule.terms.filter((term) => haystack.includes(term));
+    if (!matchedTerms.length) return [];
+    const score = buildBoundedRuleScore(matchedTerms.length, rule.perMatch, rule.maxMagnitude);
+    if (!score) return [];
+    return [{
+      matchedTerms: matchedTerms.slice(0, 4),
+      score,
+      signal: rule.signal,
+    }];
+  }).sort((a, b) => a.signal.localeCompare(b.signal));
+
+  const adjustment = round2(Math.max(-1.2, Math.min(1.2, signals.reduce((sum, signal) => sum + signal.score, 0))));
+  return { adjustment, signals };
 }
 
 export function updateTasteProfileFromDecision(
@@ -239,11 +392,14 @@ export function computeTasteForSnapshot(
 
   return {
     finalScore,
+    learnedAdjustment: tasteAdjustment,
     marketScore: clampScore(marketScore),
     matchedFeatures: matchedFeatures.sort((a, b) => {
       if (a.featureType !== b.featureType) return a.featureType.localeCompare(b.featureType);
       return a.featureValue.localeCompare(b.featureValue);
     }),
+    preferenceAdjustment: 0,
+    preferenceSignals: [],
     tasteAdjustment,
     typeScores,
   };
@@ -254,7 +410,19 @@ export function computeTasteForOpportunity(
   opportunityId: number,
   marketScore: number,
 ): TasteComputation {
-  return computeTasteForSnapshot(db, marketScore, extractOpportunityFeatures(db, opportunityId));
+  const learned = computeTasteForSnapshot(db, marketScore, extractOpportunityFeatures(db, opportunityId));
+  const preference = computeFounderPreferenceAdjustment(db, opportunityId);
+  const tasteAdjustment = round2(Math.max(-1.5, Math.min(1.5, learned.tasteAdjustment + preference.adjustment)));
+  const finalScore = clampScore(round2(learned.marketScore + tasteAdjustment));
+
+  return {
+    ...learned,
+    finalScore,
+    learnedAdjustment: learned.tasteAdjustment,
+    preferenceAdjustment: preference.adjustment,
+    preferenceSignals: preference.signals,
+    tasteAdjustment,
+  };
 }
 
 export function recomputeOpportunityScore(
