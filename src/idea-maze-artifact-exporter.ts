@@ -13,6 +13,8 @@ const ARTIFACT_SOURCE_PREFIX = 'data/artifacts/';
 const FAILED_RETRY_DELAY_MS = 15 * 60 * 1000;
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_RUNNING_MS = 10 * 60 * 1000;
+const DEFAULT_GIT_AUTHOR_EMAIL = 'nanoclaw@example.com';
+const DEFAULT_GIT_AUTHOR_NAME = 'NanoClaw';
 
 interface MirrorConfig {
   repoBranch: string;
@@ -66,6 +68,20 @@ function runGitCommand(args: string[], cwd?: string): string {
   const gitArgs = cwd ? ['-C', cwd, ...args] : args;
   return execFileSync('git', gitArgs, {
     encoding: 'utf-8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_EMAIL:
+        process.env.GIT_AUTHOR_EMAIL || DEFAULT_GIT_AUTHOR_EMAIL,
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || DEFAULT_GIT_AUTHOR_NAME,
+      GIT_COMMITTER_EMAIL:
+        process.env.GIT_COMMITTER_EMAIL ||
+        process.env.GIT_AUTHOR_EMAIL ||
+        DEFAULT_GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME:
+        process.env.GIT_COMMITTER_NAME ||
+        process.env.GIT_AUTHOR_NAME ||
+        DEFAULT_GIT_AUTHOR_NAME,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 }

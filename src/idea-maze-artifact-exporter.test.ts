@@ -476,6 +476,105 @@ describe('Idea Maze artifact exporter', () => {
     expect(mirroredBody).toBe('unborn checkout\n');
   });
 
+  it('uses a default git identity when the host has no git author configured', async () => {
+    const db = initIdeaMazeDb(groupDir);
+    const artifactRelativePath =
+      'data/artifacts/2026/04/20/default-identity.md';
+    const artifactAbsolutePath = path.join(
+      groupDir,
+      ...artifactRelativePath.split('/'),
+    );
+    const originalAuthorEmail = process.env.GIT_AUTHOR_EMAIL;
+    const originalAuthorName = process.env.GIT_AUTHOR_NAME;
+    const originalCommitterEmail = process.env.GIT_COMMITTER_EMAIL;
+    const originalCommitterName = process.env.GIT_COMMITTER_NAME;
+    const originalHome = process.env.HOME;
+    const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+    const isolatedHome = path.join(rootDir, 'isolated-home');
+
+    fs.mkdirSync(path.dirname(artifactAbsolutePath), { recursive: true });
+    fs.writeFileSync(artifactAbsolutePath, 'default identity\n', 'utf-8');
+    fs.mkdirSync(isolatedHome, { recursive: true });
+
+    db.prepare(
+      `
+      INSERT INTO opportunities (
+        id, slug, title, thesis, score, market_score, final_score, status, lifecycle_stage, cluster_key, metadata_json, created_at_utc, updated_at_utc
+      )
+      VALUES (1, 'default-identity', 'Default Identity', 'git identity', 8, 8, 8, 'active', 'approved', 'default-identity', '{}', '2026-04-20T07:00:00.000Z', '2026-04-20T07:00:00.000Z')
+    `,
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO runs (id, run_type, target_type, target_id, status, requested_by, started_at_utc, completed_at_utc, metadata_json)
+      VALUES (1, 'research', 'opportunity', '1', 'approved', 'system', '2026-04-20T07:00:00.000Z', '2026-04-20T07:01:00.000Z', '{}')
+    `,
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO artifacts (id, opportunity_id, run_id, path, version, approved_at_utc, created_at_utc)
+      VALUES (1, 1, 1, ?, 1, '2026-04-20T07:01:00.000Z', '2026-04-20T07:01:00.000Z')
+    `,
+    ).run(artifactAbsolutePath);
+    db.prepare(
+      `
+      INSERT INTO artifact_exports (
+        artifact_id, status, relative_path, repo_url, repo_branch, attempt_count, last_attempt_at_utc, commit_sha, last_error, created_at_utc, updated_at_utc
+      )
+      VALUES (1, 'pending', ?, ?, 'main', 0, NULL, NULL, NULL, '2026-04-20T07:01:00.000Z', '2026-04-20T07:01:00.000Z')
+    `,
+    ).run(artifactRelativePath, remoteRepoDir);
+    db.close();
+
+    delete process.env.GIT_AUTHOR_EMAIL;
+    delete process.env.GIT_AUTHOR_NAME;
+    delete process.env.GIT_COMMITTER_EMAIL;
+    delete process.env.GIT_COMMITTER_NAME;
+    process.env.HOME = isolatedHome;
+    process.env.XDG_CONFIG_HOME = path.join(isolatedHome, 'xdg');
+
+    try {
+      await artifactExporter!.drainIdeaMazeArtifactExports({
+        now: new Date('2026-04-20T08:00:00.000Z'),
+        source: 'startup',
+      });
+    } finally {
+      if (originalAuthorEmail === undefined) {
+        delete process.env.GIT_AUTHOR_EMAIL;
+      } else {
+        process.env.GIT_AUTHOR_EMAIL = originalAuthorEmail;
+      }
+      if (originalAuthorName === undefined) {
+        delete process.env.GIT_AUTHOR_NAME;
+      } else {
+        process.env.GIT_AUTHOR_NAME = originalAuthorName;
+      }
+      if (originalCommitterEmail === undefined) {
+        delete process.env.GIT_COMMITTER_EMAIL;
+      } else {
+        process.env.GIT_COMMITTER_EMAIL = originalCommitterEmail;
+      }
+      if (originalCommitterName === undefined) {
+        delete process.env.GIT_COMMITTER_NAME;
+      } else {
+        process.env.GIT_COMMITTER_NAME = originalCommitterName;
+      }
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalXdgConfigHome === undefined) {
+        delete process.env.XDG_CONFIG_HOME;
+      } else {
+        process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+      }
+    }
+
+    const author = git(['log', '-1', '--format=%an <%ae>'], mirrorCheckoutDir);
+    expect(author).toBe('NanoClaw <nanoclaw@example.com>');
+  });
+
   it('creates missing export support tables before queueing backfill rows', async () => {
     const dbPath = path.join(groupDir, 'data', 'lab.db');
     const db = new Database(dbPath);
