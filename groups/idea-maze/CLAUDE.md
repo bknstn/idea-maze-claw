@@ -9,7 +9,7 @@ Current founder preference: prioritize small self-serve subscription products th
 1. **Harvest** — Ingest from Gmail, Reddit, Telegram channels into `source_items` with automated scoring
 2. **Insights** — Extract typed signals (pain points, demand signals, workflow gaps, etc.)
 3. **Opportunities** — Cluster insights, score by evidence strength and source diversity
-4. **Research Routing** — Score buckets `9-10` auto-research and auto-approve, `7-8` draft into `review_gate`, `<=6` are ignored
+4. **Research Routing** — Score buckets `9-10` auto-research and auto-approve, anything below `9` is skipped/ignored by the automated pipeline
 5. **Artifacts** — On human approval, render Markdown reports. If `IDEA_MAZE_ARTIFACTS_REPO_URL` is set, approved reports are queued for host-side mirroring into that git repo.
 
 ## Data Layout
@@ -49,7 +49,7 @@ See the `/idea-maze` skill for exact `schedule_task` configurations.
 
 - Raw snapshots are immutable — never modify files under `data/raw/`
 - Deduplicate on `(source, external_id)` — never create duplicate source items
-- Manual research runs pass through `review_gate`; pipeline score buckets `9-10` may auto-approve immediately
+- Manual research runs pass through `review_gate`; the automated pipeline only acts on score buckets `9-10` and ignores anything lower
 - Approval/rejection decisions are always recorded in the `approvals` table
 - Harvest scoring is deterministic code, not prompt-based
 - When in doubt, prefer narrow self-serve subscription opportunities over enterprise workflows

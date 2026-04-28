@@ -3,15 +3,14 @@
  *
  * Buckets:
  * - 9-10: draft research and auto-approve it
- * - 7-8: draft research and leave it in review_gate
- * - <=6: ignored earlier during opportunity refresh
+ * - <9: skip and ignore it
  *
  * Usage: tsx process-opportunities.ts [--limit N] [--all]
  */
 
 import { closeDb, getDb } from "./lib/db.ts";
 import { setOpportunityLifecycle } from "./lib/opportunity-state.ts";
-import { classifyOpportunityScore } from "./lib/opportunity-policy.ts";
+import { AUTO_APPROVE_MIN_BUCKET, classifyOpportunityScore } from "./lib/opportunity-policy.ts";
 import { researchOpportunity } from "./lib/research.ts";
 import { approveResearchRun } from "./lib/review.ts";
 import { withStageRunContext } from "./lib/run-events.ts";
@@ -57,6 +56,12 @@ async function main() {
   });
   try {
     const maxNewResearchRuns = parseNewResearchLimit();
+    const ignoredLowScoreOpportunities = (db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM opportunities
+      WHERE status = 'active'
+        AND final_score < ?
+    `).get(AUTO_APPROVE_MIN_BUCKET) as { count: number }).count;
     const opportunities = db.prepare(`
       SELECT
         o.id,
@@ -81,29 +86,33 @@ async function main() {
         ) AS pending_run_id
       FROM opportunities o
       WHERE o.status = 'active'
+        AND o.final_score >= ?
       ORDER BY o.final_score DESC, o.updated_at_utc DESC
-    `).all() as OpportunityRow[];
+    `).all(AUTO_APPROVE_MIN_BUCKET) as OpportunityRow[];
 
     if (!opportunities.length) {
-      console.log("No opportunities to process.");
+      console.log("No auto-approval candidates to process.");
+      if (ignoredLowScoreOpportunities > 0) {
+        console.log(`Ignored ${ignoredLowScoreOpportunities} low-score active opportunities.`);
+      }
       stageRun.finish("completed", "No opportunities to process.", {
-        processed_opportunities: 0,
+        ignored: ignoredLowScoreOpportunities,
+        processed_opportunities: ignoredLowScoreOpportunities,
       });
       return;
     }
 
     console.log(
-      `Processing ${opportunities.length} active opportunities (new research budget: ${
+      `Processing ${opportunities.length} auto-approval candidates (new research budget: ${
         Number.isFinite(maxNewResearchRuns) ? maxNewResearchRuns : "unbounded"
-      }).`,
+      }, ignored low-score active opportunities: ${ignoredLowScoreOpportunities}).`,
     );
 
     const summary = {
       auto_approved_existing: 0,
       auto_approved_new: 0,
       deferred_due_to_budget: 0,
-      ignored: 0,
-      manual_review_new: 0,
+      ignored: ignoredLowScoreOpportunities,
       skipped_existing: 0,
     };
     let startedNewResearchRuns = 0;
@@ -128,7 +137,7 @@ async function main() {
         summary: `Opportunity shortlisted at final score ${opp.final_score}.`,
       });
 
-      if (policy.disposition === "auto_approve" && opp.pending_run_id) {
+      if (opp.pending_run_id) {
         const { path } = approveResearchRun(
           db,
           Number(opp.pending_run_id),
@@ -154,33 +163,30 @@ async function main() {
       startedNewResearchRuns++;
 
       const result = await researchOpportunity(opp.slug, {
-        approvalMode: policy.disposition === "auto_approve" ? "auto_approve" : "review_gate",
-        approvalNotes: policy.disposition === "auto_approve"
-          ? `Auto-approved by pipeline for score bucket ${policy.bucket}.`
-          : null,
+        approvalMode: "auto_approve",
+        approvalNotes: `Auto-approved by pipeline for score bucket ${policy.bucket}.`,
         db,
         logger: console,
         requestedBy: "system",
         runIdForEvents: stageRun.runId,
       });
 
-      if (result.status === "approved") {
-        summary.auto_approved_new++;
-      } else {
-        summary.manual_review_new++;
+      if (result.status !== "approved") {
+        throw new Error(`Expected auto-approved research run for ${opp.slug}, got ${result.status}.`);
       }
+      summary.auto_approved_new++;
     }
 
     console.log("\nOpportunity processing summary:");
     console.log(`  auto-approved existing review runs: ${summary.auto_approved_existing}`);
     console.log(`  auto-approved new research runs:    ${summary.auto_approved_new}`);
-    console.log(`  queued manual review runs:          ${summary.manual_review_new}`);
     console.log(`  skipped existing history:           ${summary.skipped_existing}`);
     console.log(`  deferred due to per-run budget:     ${summary.deferred_due_to_budget}`);
     console.log(`  ignored low-score opportunities:    ${summary.ignored}`);
     stageRun.finish("completed", "Opportunity processing complete.", {
       ...summary,
-      processed_opportunities: opportunities.length,
+      auto_approval_candidates: opportunities.length,
+      processed_opportunities: opportunities.length + summary.ignored,
     });
   } catch (err) {
     stageRun.finish("error", `Opportunity processing failed: ${err instanceof Error ? err.message : String(err)}`);

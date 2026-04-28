@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 
+import { AUTO_APPROVE_MIN_BUCKET } from "./opportunity-policy.ts";
+
 /**
  * Initialize the full Idea Maze schema. Safe to call multiple times —
  * all statements use IF NOT EXISTS.
@@ -387,7 +389,7 @@ function backfillOpportunityState(db: Database.Database): void {
           AND r.status = 'rejected'
       ) THEN 'rejected'
       WHEN status = 'archived' THEN 'archived'
-      WHEN final_score >= 7 THEN 'shortlisted'
+      WHEN final_score >= ${AUTO_APPROVE_MIN_BUCKET} THEN 'shortlisted'
       ELSE 'scored'
     END
     WHERE lifecycle_stage IS NULL

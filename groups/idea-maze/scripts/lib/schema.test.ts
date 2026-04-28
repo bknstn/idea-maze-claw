@@ -66,6 +66,14 @@ describe("initSchema migrations", () => {
       VALUES (1, 'finance-ops', 'Finance Ops', 'Manual invoices are painful.', 8.4, 'active', 'finance-ops', '{}', '2026-04-15T06:00:00.000Z', '2026-04-15T06:00:00.000Z')
     `).run();
     rawDb.prepare(`
+      INSERT INTO opportunities (id, slug, title, thesis, score, status, cluster_key, metadata_json, created_at_utc, updated_at_utc)
+      VALUES (2, 'solo-crm', 'Solo CRM', 'Solo operators need lightweight CRM follow-up.', 8.4, 'active', 'solo-crm', '{}', '2026-04-15T06:00:00.000Z', '2026-04-15T06:00:00.000Z')
+    `).run();
+    rawDb.prepare(`
+      INSERT INTO opportunities (id, slug, title, thesis, score, status, cluster_key, metadata_json, created_at_utc, updated_at_utc)
+      VALUES (3, 'receipt-agent', 'Receipt Agent', 'Tiny teams need receipt cleanup automation.', 9.1, 'active', 'receipt-agent', '{}', '2026-04-15T06:00:00.000Z', '2026-04-15T06:00:00.000Z')
+    `).run();
+    rawDb.prepare(`
       INSERT INTO runs (id, run_type, target_type, target_id, status, requested_by, started_at_utc, metadata_json)
       VALUES (1, 'research', 'opportunity', '1', 'review_gate', 'system', '2026-04-15T06:10:00.000Z', '{}')
     `).run();
@@ -96,5 +104,17 @@ describe("initSchema migrations", () => {
     expect(row.market_score).toBe(8.4);
     expect(row.final_score).toBe(8.4);
     expect(row.lifecycle_stage).toBe("review_gate");
+
+    const backfilledRows = db.prepare(`
+      SELECT id, lifecycle_stage
+      FROM opportunities
+      WHERE id IN (2, 3)
+      ORDER BY id
+    `).all() as Array<{ id: number; lifecycle_stage: string }>;
+
+    expect(backfilledRows).toEqual([
+      { id: 2, lifecycle_stage: "scored" },
+      { id: 3, lifecycle_stage: "shortlisted" },
+    ]);
   });
 });

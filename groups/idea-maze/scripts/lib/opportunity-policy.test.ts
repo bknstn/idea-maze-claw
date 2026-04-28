@@ -18,21 +18,18 @@ describe("getOpportunityScoreBucket", () => {
 });
 
 describe("classifyOpportunityScore", () => {
-  it("ignores score buckets up to 6", () => {
+  it("ignores score buckets below 9", () => {
     expect(classifyOpportunityScore(6.99)).toEqual({
       bucket: 6,
       disposition: "ignore",
     });
-  });
-
-  it("routes score buckets 7 and 8 to manual review", () => {
     expect(classifyOpportunityScore(7.25)).toEqual({
       bucket: 7,
-      disposition: "manual_review",
+      disposition: "ignore",
     });
     expect(classifyOpportunityScore(8.99)).toEqual({
       bucket: 8,
-      disposition: "manual_review",
+      disposition: "ignore",
     });
   });
 
