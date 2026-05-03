@@ -8,45 +8,200 @@
  * Usage: tsx refresh-opportunities.ts
  */
 
-import { closeDb, getDb } from "./lib/db.ts";
-import { mergeOpportunityMetadata, setOpportunityLifecycle, type OpportunityLifecycleStage } from "./lib/opportunity-state.ts";
-import { classifyOpportunityScore } from "./lib/opportunity-policy.ts";
-import { withStageRunContext } from "./lib/run-events.ts";
-import { initSchema } from "./lib/schema.ts";
-import { recomputeOpportunityScore } from "./lib/taste.ts";
+import { closeDb, getDb } from './lib/db.ts';
+import {
+  mergeOpportunityMetadata,
+  setOpportunityLifecycle,
+  type OpportunityLifecycleStage,
+} from './lib/opportunity-state.ts';
+import { classifyOpportunityScore } from './lib/opportunity-policy.ts';
+import { withStageRunContext } from './lib/run-events.ts';
+import { initSchema } from './lib/schema.ts';
+import { recomputeOpportunityScore } from './lib/taste.ts';
 
 // --- Helpers ---
 
 const STOP_WORDS = new Set([
   // Articles, conjunctions, prepositions
-  "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-  "of", "with", "by", "from", "into", "over", "such", "per",
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'in',
+  'on',
+  'at',
+  'to',
+  'for',
+  'of',
+  'with',
+  'by',
+  'from',
+  'into',
+  'over',
+  'such',
+  'per',
   // Pronouns
-  "it", "its", "they", "we", "you", "he", "she", "my", "our", "your",
-  "their", "this", "that", "these", "those", "there", "who", "which",
-  "what", "when", "where", "how",
+  'it',
+  'its',
+  'they',
+  'we',
+  'you',
+  'he',
+  'she',
+  'my',
+  'our',
+  'your',
+  'their',
+  'this',
+  'that',
+  'these',
+  'those',
+  'there',
+  'who',
+  'which',
+  'what',
+  'when',
+  'where',
+  'how',
   // Common verbs
-  "is", "are", "was", "were", "be", "been", "being", "has", "have", "had",
-  "do", "does", "did", "get", "gets", "got", "use", "uses", "used",
-  "make", "made", "need", "needs", "want", "wants", "can", "will",
-  "would", "could", "should", "may", "might", "let", "set", "run",
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'has',
+  'have',
+  'had',
+  'do',
+  'does',
+  'did',
+  'get',
+  'gets',
+  'got',
+  'use',
+  'uses',
+  'used',
+  'make',
+  'made',
+  'need',
+  'needs',
+  'want',
+  'wants',
+  'can',
+  'will',
+  'would',
+  'could',
+  'should',
+  'may',
+  'might',
+  'let',
+  'set',
+  'run',
   // Common adverbs / filler
-  "not", "just", "now", "than", "then", "also", "very", "more", "most",
-  "some", "any", "all", "each", "every", "both", "few", "often",
-  "still", "even", "only", "about", "like", "well", "already", "always",
-  "never", "really", "quite", "rather", "much", "many",
+  'not',
+  'just',
+  'now',
+  'than',
+  'then',
+  'also',
+  'very',
+  'more',
+  'most',
+  'some',
+  'any',
+  'all',
+  'each',
+  'every',
+  'both',
+  'few',
+  'often',
+  'still',
+  'even',
+  'only',
+  'about',
+  'like',
+  'well',
+  'already',
+  'always',
+  'never',
+  'really',
+  'quite',
+  'rather',
+  'much',
+  'many',
   // Common generic adjectives
-  "good", "new", "old", "big", "small", "large", "great", "high", "low",
-  "long", "short", "same", "other", "own", "right", "next", "last",
-  "little", "general", "clear", "actual", "certain", "free", "full",
-  "able", "due", "real", "early", "easy", "hard", "simple", "true",
-  "open", "public", "specific", "best", "better", "worse", "common",
-  "around", "concrete", "actual", "honest", "boring", "genuine",
-  "blind", "conscious", "brief", "correct", "dark", "direct", "done",
+  'good',
+  'new',
+  'old',
+  'big',
+  'small',
+  'large',
+  'great',
+  'high',
+  'low',
+  'long',
+  'short',
+  'same',
+  'other',
+  'own',
+  'right',
+  'next',
+  'last',
+  'little',
+  'general',
+  'clear',
+  'actual',
+  'certain',
+  'free',
+  'full',
+  'able',
+  'due',
+  'real',
+  'early',
+  'easy',
+  'hard',
+  'simple',
+  'true',
+  'open',
+  'public',
+  'specific',
+  'best',
+  'better',
+  'worse',
+  'common',
+  'around',
+  'concrete',
+  'actual',
+  'honest',
+  'boring',
+  'genuine',
+  'blind',
+  'conscious',
+  'brief',
+  'correct',
+  'dark',
+  'direct',
+  'done',
   // Pipeline template words
-  "signal", "signals", "potential", "demand", "clue", "mentioned",
-  "productized", "monitoring", "point", "constraint", "caveat",
-  "opportunity", "insight", "around", "pricing",
+  'signal',
+  'signals',
+  'potential',
+  'demand',
+  'clue',
+  'mentioned',
+  'productized',
+  'monitoring',
+  'point',
+  'constraint',
+  'caveat',
+  'opportunity',
+  'insight',
+  'around',
+  'pricing',
 ]);
 
 function topKeywords(texts: string[], limit = 2): string[] {
@@ -66,12 +221,13 @@ function topKeywords(texts: string[], limit = 2): string[] {
 }
 
 function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    || "untitled-opportunity";
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'untitled-opportunity'
+  );
 }
 
 function harvestScoreFromMeta(metaStr: string): number {
@@ -87,23 +243,27 @@ function harvestScoreFromMeta(metaStr: string): number {
 function main() {
   const db = getDb();
   initSchema(db);
-  const stageRun = withStageRunContext(db, "refresh-opportunities", {
-    requestedBy: process.env.IDEA_MAZE_PARENT_RUN_ID ? "system" : "user",
+  const stageRun = withStageRunContext(db, 'refresh-opportunities', {
+    requestedBy: process.env.IDEA_MAZE_PARENT_RUN_ID ? 'system' : 'user',
   });
 
   try {
-    const insights = db.prepare(`
+    const insights = db
+      .prepare(
+        `
       SELECT i.*, si.source as si_source, si.title as si_title, si.text as si_text,
              si.metadata_json as si_metadata_json
       FROM insights i
       JOIN source_items si ON si.id = i.source_item_id
       ORDER BY i.created_at_utc DESC
       LIMIT 500
-    `).all() as any[];
+    `,
+      )
+      .all() as any[];
 
     if (!insights.length) {
-      console.log("No insights to cluster.");
-      stageRun.finish("completed", "No insights to cluster.", {
+      console.log('No insights to cluster.');
+      stageRun.finish('completed', 'No insights to cluster.', {
         archived: 0,
         created_or_updated: 0,
       });
@@ -114,7 +274,7 @@ function main() {
 
     const clusters = new Map<string, any[]>();
     for (const insight of insights) {
-      const sourceText = `${insight.si_title ?? ""} ${insight.si_text ?? ""}`;
+      const sourceText = `${insight.si_title ?? ''} ${insight.si_text ?? ''}`;
       const keywords = topKeywords([sourceText, insight.summary], 3);
       const clusterKey = keywords[0] ?? insight.insight_type;
       if (!clusters.has(clusterKey)) clusters.set(clusterKey, []);
@@ -151,7 +311,9 @@ function main() {
         metadata_json = excluded.metadata_json,
         updated_at_utc = excluded.updated_at_utc
     `);
-    const replaceSources = db.prepare("DELETE FROM opportunity_sources WHERE opportunity_id = ?");
+    const replaceSources = db.prepare(
+      'DELETE FROM opportunity_sources WHERE opportunity_id = ?',
+    );
     const linkSource = db.prepare(`
       INSERT OR IGNORE INTO opportunity_sources (opportunity_id, source_item_id)
       VALUES (?, ?)
@@ -161,9 +323,15 @@ function main() {
       FROM opportunities
       WHERE slug = ?
     `);
-    const hasApprovedArtifact = db.prepare("SELECT 1 FROM artifacts WHERE opportunity_id = ? LIMIT 1");
-    const hasApprovedRun = db.prepare("SELECT 1 FROM runs WHERE target_id = ? AND status = 'approved' LIMIT 1");
-    const hasPendingRun = db.prepare("SELECT 1 FROM runs WHERE target_id = ? AND status IN ('running', 'review_gate') LIMIT 1");
+    const hasArtifact = db.prepare(
+      'SELECT 1 FROM artifacts WHERE opportunity_id = ? LIMIT 1',
+    );
+    const hasPublishedRun = db.prepare(
+      "SELECT 1 FROM runs WHERE target_id = ? AND status IN ('published', 'approved') LIMIT 1",
+    );
+    const hasOpenResearchRun = db.prepare(
+      "SELECT 1 FROM runs WHERE target_id = ? AND status IN ('running', 'draft_ready', 'review_gate') LIMIT 1",
+    );
 
     let archived = 0;
     let createdOrUpdated = 0;
@@ -173,25 +341,38 @@ function main() {
       ([, items]) => items.length >= MIN_INSIGHTS,
     );
 
-    console.log(`Found ${clusters.size} raw clusters, ${filteredClusters.length} with ≥${MIN_INSIGHTS} insights.`);
+    console.log(
+      `Found ${clusters.size} raw clusters, ${filteredClusters.length} with ≥${MIN_INSIGHTS} insights.`,
+    );
 
     for (const [clusterKey, clusterInsights] of filteredClusters) {
       const ranked = clusterInsights.sort((a: any, b: any) => {
-        const scoreA = a.evidence_score + harvestScoreFromMeta(a.si_metadata_json);
-        const scoreB = b.evidence_score + harvestScoreFromMeta(b.si_metadata_json);
+        const scoreA =
+          a.evidence_score + harvestScoreFromMeta(a.si_metadata_json);
+        const scoreB =
+          b.evidence_score + harvestScoreFromMeta(b.si_metadata_json);
         if (scoreB !== scoreA) return scoreB - scoreA;
-        return (b.created_at_utc ?? "").localeCompare(a.created_at_utc ?? "");
+        return (b.created_at_utc ?? '').localeCompare(a.created_at_utc ?? '');
       });
 
-      const allText = ranked.map((i: any) => `${i.si_title ?? ""} ${i.si_text ?? ""} ${i.summary}`).join(" ");
+      const allText = ranked
+        .map((i: any) => `${i.si_title ?? ''} ${i.si_text ?? ''} ${i.summary}`)
+        .join(' ');
       const topWords = topKeywords([allText], 3);
-      const bigramLabel = topWords.slice(0, 2).join("-") || clusterKey;
-      const title = bigramLabel.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+      const bigramLabel = topWords.slice(0, 2).join('-') || clusterKey;
+      const title = bigramLabel
+        .replace(/-/g, ' ')
+        .replace(/\b\w/g, (c: string) => c.toUpperCase());
       const slug = slugify(title);
       const thesis = ranked[0].summary;
 
-      const sourceScores = ranked.map((i: any) => harvestScoreFromMeta(i.si_metadata_json));
-      const avgSourceScore = sourceScores.length ? sourceScores.reduce((a: number, b: number) => a + b, 0) / sourceScores.length : 0;
+      const sourceScores = ranked.map((i: any) =>
+        harvestScoreFromMeta(i.si_metadata_json),
+      );
+      const avgSourceScore = sourceScores.length
+        ? sourceScores.reduce((a: number, b: number) => a + b, 0) /
+          sourceScores.length
+        : 0;
       const uniqueSources = new Set(ranked.map((i: any) => i.si_source)).size;
 
       const weightedEvidence = ranked.reduce((sum: number, i: any) => {
@@ -199,9 +380,16 @@ function main() {
         return sum + i.evidence_score * (1.0 + hs * 0.75);
       }, 0);
 
-      const marketScore = Math.round(
-        Math.min(10.0, weightedEvidence + avgSourceScore * 2.5 + uniqueSources * 0.4 + ranked.length * 0.2) * 100,
-      ) / 100;
+      const marketScore =
+        Math.round(
+          Math.min(
+            10.0,
+            weightedEvidence +
+              avgSourceScore * 2.5 +
+              uniqueSources * 0.4 +
+              ranked.length * 0.2,
+          ) * 100,
+        ) / 100;
 
       const patternCounts = new Map<string, number>();
       const signalCounts = new Map<string, number>();
@@ -225,8 +413,14 @@ function main() {
         insight_count: ranked.length,
         market_score: marketScore,
         source_count: uniqueSources,
-        top_harvest_signals: [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name]) => name),
-        top_source_patterns: [...patternCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name]) => name),
+        top_harvest_signals: [...signalCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([name]) => name),
+        top_source_patterns: [...patternCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([name]) => name),
       };
 
       upsertOpp.run(
@@ -242,11 +436,13 @@ function main() {
         now,
       );
 
-      const opportunity = getOpp.get(slug) as {
-        id: number;
-        lifecycle_stage: OpportunityLifecycleStage | null;
-        metadata_json: string;
-      } | undefined;
+      const opportunity = getOpp.get(slug) as
+        | {
+            id: number;
+            lifecycle_stage: OpportunityLifecycleStage | null;
+            metadata_json: string;
+          }
+        | undefined;
       if (!opportunity) continue;
 
       replaceSources.run(opportunity.id);
@@ -263,69 +459,93 @@ function main() {
 
       const targetId = String(opportunity.id);
       const protectedHistory = Boolean(
-        hasApprovedArtifact.get(opportunity.id)
-        || hasApprovedRun.get(targetId)
-        || hasPendingRun.get(targetId),
+        hasArtifact.get(opportunity.id) ||
+        hasPublishedRun.get(targetId) ||
+        hasOpenResearchRun.get(targetId),
       );
 
-      const keepLifecycleForHistory = protectedHistory
-        && opportunity.lifecycle_stage
-        && ["approved", "review_gate", "researching", "rejected"].includes(opportunity.lifecycle_stage);
+      const keepLifecycleForHistory =
+        protectedHistory &&
+        opportunity.lifecycle_stage &&
+        ['artifact', 'researching'].includes(opportunity.lifecycle_stage);
 
-      const nextLifecycle: OpportunityLifecycleStage = policy.disposition === "ignore"
-        ? (keepLifecycleForHistory
-          ? opportunity.lifecycle_stage!
-          : "archived")
-        : "scored";
-      const nextStatus = policy.disposition === "ignore" ? "archived" : "active";
+      const nextLifecycle: OpportunityLifecycleStage =
+        policy.disposition === 'ignore'
+          ? keepLifecycleForHistory
+            ? opportunity.lifecycle_stage!
+            : 'archived'
+          : 'scored';
+      const nextStatus =
+        policy.disposition === 'ignore' ? 'archived' : 'active';
 
       setOpportunityLifecycle(db, opportunity.id, nextLifecycle as any, {
         payload: {
-          archive_reason: policy.disposition === "ignore" ? "low_score_filtered" : null,
+          archive_reason:
+            policy.disposition === 'ignore' ? 'low_score_filtered' : null,
           final_score: scores.finalScore,
           market_score: scores.marketScore,
-          review_disposition: policy.disposition,
+          automation_disposition: policy.disposition,
           score_bucket: policy.bucket,
           taste_adjustment: scores.tasteAdjustment,
         },
         runId: stageRun.runId,
         status: nextStatus,
-        summary: policy.disposition === "ignore"
-          ? `Opportunity archived after low-score filter (${scores.finalScore}).`
-          : `Opportunity scored at ${scores.finalScore} and kept active.`,
+        summary:
+          policy.disposition === 'ignore'
+            ? `Opportunity archived after low-score filter (${scores.finalScore}).`
+            : `Opportunity scored at ${scores.finalScore} and kept active.`,
       });
 
-      db.prepare(`
+      db.prepare(
+        `
         UPDATE opportunities
         SET metadata_json = ?
         WHERE id = ?
-      `).run(mergeOpportunityMetadata(opportunity.metadata_json, {
-        archive_reason: policy.disposition === "ignore" ? "low_score_filtered" : undefined,
-        ...metadata,
-        final_score: scores.finalScore,
-        review_disposition: policy.disposition,
-        score_bucket: policy.bucket,
-        taste_adjustment: scores.tasteAdjustment,
-      }), opportunity.id);
+      `,
+      ).run(
+        mergeOpportunityMetadata(opportunity.metadata_json, {
+          archive_reason:
+            policy.disposition === 'ignore' ? 'low_score_filtered' : undefined,
+          ...metadata,
+          final_score: scores.finalScore,
+          automation_disposition: policy.disposition,
+          score_bucket: policy.bucket,
+          taste_adjustment: scores.tasteAdjustment,
+        }),
+        opportunity.id,
+      );
 
-      if (policy.disposition === "ignore") {
+      if (policy.disposition === 'ignore') {
         archived++;
-        console.log(`  ${slug}: market=${marketScore}, final=${scores.finalScore}, archived.`);
+        console.log(
+          `  ${slug}: market=${marketScore}, final=${scores.finalScore}, archived.`,
+        );
       } else {
-        console.log(`  ${slug}: market=${marketScore}, final=${scores.finalScore}, insights=${ranked.length}, sources=${uniqueSources}`);
+        console.log(
+          `  ${slug}: market=${marketScore}, final=${scores.finalScore}, insights=${ranked.length}, sources=${uniqueSources}`,
+        );
       }
       createdOrUpdated++;
     }
 
-    console.log(`\nDone. ${createdOrUpdated} opportunities refreshed, ${archived} archived.`);
-    stageRun.finish("completed", `Refreshed ${createdOrUpdated} opportunities.`, {
-      archived,
-      created_or_updated: createdOrUpdated,
-      raw_clusters: clusters.size,
-      scored_clusters: filteredClusters.length,
-    });
+    console.log(
+      `\nDone. ${createdOrUpdated} opportunities refreshed, ${archived} archived.`,
+    );
+    stageRun.finish(
+      'completed',
+      `Refreshed ${createdOrUpdated} opportunities.`,
+      {
+        archived,
+        created_or_updated: createdOrUpdated,
+        raw_clusters: clusters.size,
+        scored_clusters: filteredClusters.length,
+      },
+    );
   } catch (err) {
-    stageRun.finish("error", `Opportunity refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+    stageRun.finish(
+      'error',
+      `Opportunity refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     throw err;
   } finally {
     closeDb();

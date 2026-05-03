@@ -24,7 +24,7 @@ const TASK_DEFINITIONS: TaskDefinition[] = [
   {
     id: 'idea-maze-pipeline',
     prompt:
-      'Run the active Idea Maze pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report a concise results summary.',
+      'Run the active Idea Maze pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report only stage status, source/insight/opportunity counts, artifacts created, and skipped low-score count. Do not infer manual follow-up or ask the user to take action.',
     schedule_type: 'cron',
     schedule_value: '0 8 * * *',
     context_mode: 'isolated',

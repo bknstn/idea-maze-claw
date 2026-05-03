@@ -71,11 +71,11 @@ These entries use the fields Qodo expects during retrieval: `name`, `severity`, 
 ## Path-Level Rules For `groups/idea-maze/`
 
 ```yaml
-- name: Preserve Human Approval Gate
+- name: Preserve Automated Artifact Publication
   severity: error
   category: Pipeline
   scope: /bknstn/idea-maze-claw/groups/idea-maze/
-  description: Research generation may prepare draft output, but final artifact publication must remain approval-gated. Do not bypass the review gate or write approved artifacts directly from an automated research run without an explicit approval step.
+  description: The Idea Maze pipeline is fully automated. Score-bucket 9-10 opportunities should publish artifacts automatically, lower-score opportunities should be skipped or ignored, and user-facing pipeline output must not ask for manual research decisions.
 
 - name: Treat Raw Harvest Data As Immutable
   severity: warning
@@ -91,6 +91,6 @@ If you want to start minimal, create these first:
 1. `No Hardcoded Credentials`
 2. `Preserve Isolation Boundaries`
 3. `Skills Not Core Features`
-4. `Preserve Human Approval Gate`
+4. `Preserve Automated Artifact Publication`
 
 Those four capture the highest-risk constraints in this repo. The rest mainly tighten architecture discipline and review quality.

@@ -1,6 +1,6 @@
-export const AUTO_APPROVE_MIN_BUCKET = 9;
+export const AUTO_PUBLISH_MIN_BUCKET = 9;
 
-export type OpportunityDisposition = "ignore" | "auto_approve";
+export type OpportunityDisposition = 'ignore' | 'publish_artifact';
 
 export interface OpportunityPolicy {
   bucket: number;
@@ -14,8 +14,8 @@ export function getOpportunityScoreBucket(score: number): number {
 
 export function classifyOpportunityScore(score: number): OpportunityPolicy {
   const bucket = getOpportunityScoreBucket(score);
-  if (bucket >= AUTO_APPROVE_MIN_BUCKET) {
-    return { bucket, disposition: "auto_approve" };
+  if (bucket >= AUTO_PUBLISH_MIN_BUCKET) {
+    return { bucket, disposition: 'publish_artifact' };
   }
-  return { bucket, disposition: "ignore" };
+  return { bucket, disposition: 'ignore' };
 }

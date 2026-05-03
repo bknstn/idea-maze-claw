@@ -1,11 +1,11 @@
 const INSIGHT_TYPES = new Set([
-  "pain_point",
-  "demand_signal",
-  "workflow_gap",
-  "distribution_clue",
-  "willingness_to_pay",
-  "competitor_move",
-  "implementation_constraint",
+  'pain_point',
+  'demand_signal',
+  'workflow_gap',
+  'distribution_clue',
+  'willingness_to_pay',
+  'competitor_move',
+  'implementation_constraint',
 ]);
 
 interface ValidationResult<T> {
@@ -27,16 +27,24 @@ export interface ValidatedHarvestBatch {
   }>;
 }
 
-function validateNumber(value: unknown, path: string, errors: string[]): number | null {
-  if (typeof value !== "number" || Number.isNaN(value)) {
+function validateNumber(
+  value: unknown,
+  path: string,
+  errors: string[],
+): number | null {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
     errors.push(`${path} must be a number`);
     return null;
   }
   return value;
 }
 
-function validateString(value: unknown, path: string, errors: string[]): string | null {
-  if (typeof value !== "string" || !value.trim()) {
+function validateString(
+  value: unknown,
+  path: string,
+  errors: string[],
+): string | null {
+  if (typeof value !== 'string' || !value.trim()) {
     errors.push(`${path} must be a non-empty string`);
     return null;
   }
@@ -48,7 +56,7 @@ function validateObject(
   path: string,
   errors: string[],
 ): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     errors.push(`${path} must be an object`);
     return null;
   }
@@ -69,21 +77,39 @@ function validateInsight(
   const object = validateObject(input, path, errors);
   if (!object) return { errors, value: null };
 
-  const insightType = validateString(object.insight_type, `${path}.insight_type`, errors);
+  const insightType = validateString(
+    object.insight_type,
+    `${path}.insight_type`,
+    errors,
+  );
   if (insightType && !INSIGHT_TYPES.has(insightType)) {
-    errors.push(`${path}.insight_type must be one of ${[...INSIGHT_TYPES].join(", ")}`);
+    errors.push(
+      `${path}.insight_type must be one of ${[...INSIGHT_TYPES].join(', ')}`,
+    );
   }
 
   const summary = validateString(object.summary, `${path}.summary`, errors);
-  const evidenceScore = validateNumber(object.evidence_score, `${path}.evidence_score`, errors);
+  const evidenceScore = validateNumber(
+    object.evidence_score,
+    `${path}.evidence_score`,
+    errors,
+  );
   if (evidenceScore !== null && (evidenceScore < 0 || evidenceScore > 1)) {
     errors.push(`${path}.evidence_score must be between 0 and 1`);
   }
-  const confidence = validateNumber(object.confidence, `${path}.confidence`, errors);
+  const confidence = validateNumber(
+    object.confidence,
+    `${path}.confidence`,
+    errors,
+  );
   if (confidence !== null && (confidence < 0 || confidence > 1)) {
     errors.push(`${path}.confidence must be between 0 and 1`);
   }
-  const metadataJson = validateObject(object.metadata_json ?? {}, `${path}.metadata_json`, errors);
+  const metadataJson = validateObject(
+    object.metadata_json ?? {},
+    `${path}.metadata_json`,
+    errors,
+  );
 
   if (errors.length) return { errors, value: null };
   return {
@@ -98,16 +124,18 @@ function validateInsight(
   };
 }
 
-export function validateHarvestBatchResponse(input: unknown): ValidatedHarvestBatch {
+export function validateHarvestBatchResponse(
+  input: unknown,
+): ValidatedHarvestBatch {
   const errors: string[] = [];
-  const object = validateObject(input, "response", errors);
+  const object = validateObject(input, 'response', errors);
   const itemsRaw = object?.items;
   if (!Array.isArray(itemsRaw)) {
-    errors.push("response.items must be an array");
+    errors.push('response.items must be an array');
     return { errors, items: [] };
   }
 
-  const items: ValidatedHarvestBatch["items"] = [];
+  const items: ValidatedHarvestBatch['items'] = [];
   for (let itemIndex = 0; itemIndex < itemsRaw.length; itemIndex++) {
     const itemPath = `response.items[${itemIndex}]`;
     const itemObject = validateObject(itemsRaw[itemIndex], itemPath, errors);
@@ -120,9 +148,16 @@ export function validateHarvestBatchResponse(input: unknown): ValidatedHarvestBa
       continue;
     }
 
-    const insights: ValidatedHarvestBatch["items"][number]["insights"] = [];
-    for (let insightIndex = 0; insightIndex < insightsRaw.length; insightIndex++) {
-      const result = validateInsight(insightsRaw[insightIndex], `${itemPath}.insights[${insightIndex}]`);
+    const insights: ValidatedHarvestBatch['items'][number]['insights'] = [];
+    for (
+      let insightIndex = 0;
+      insightIndex < insightsRaw.length;
+      insightIndex++
+    ) {
+      const result = validateInsight(
+        insightsRaw[insightIndex],
+        `${itemPath}.insights[${insightIndex}]`,
+      );
       if (result.value) {
         insights.push(result.value);
       } else {
@@ -139,7 +174,6 @@ export function validateHarvestBatchResponse(input: unknown): ValidatedHarvestBa
 }
 
 export interface ValidatedResearchDraft {
-  decision_for_human_review: string;
   distribution_plan: string[];
   evidence_from_inbox: string[];
   evidence_from_reddit: string[];
@@ -152,7 +186,11 @@ export interface ValidatedResearchDraft {
   thesis: string;
 }
 
-function validateStringArray(value: unknown, path: string, errors: string[]): string[] | null {
+function validateStringArray(
+  value: unknown,
+  path: string,
+  errors: string[],
+): string[] | null {
   if (!Array.isArray(value)) {
     errors.push(`${path} must be an array`);
     return null;
@@ -167,26 +205,55 @@ function validateStringArray(value: unknown, path: string, errors: string[]): st
   return items;
 }
 
-export function validateResearchDraft(input: unknown): ValidationResult<ValidatedResearchDraft> {
+export function validateResearchDraft(
+  input: unknown,
+): ValidationResult<ValidatedResearchDraft> {
   const errors: string[] = [];
-  const object = validateObject(input, "draft", errors);
+  const object = validateObject(input, 'draft', errors);
   if (!object) return { errors, value: null };
 
-  const thesis = validateString(object.thesis, "draft.thesis", errors);
-  const evidenceFromInbox = validateStringArray(object.evidence_from_inbox, "draft.evidence_from_inbox", errors);
-  const evidenceFromTelegram = validateStringArray(object.evidence_from_telegram, "draft.evidence_from_telegram", errors);
-  const evidenceFromReddit = validateStringArray(object.evidence_from_reddit, "draft.evidence_from_reddit", errors);
-  const externalMarketCheck = validateStringArray(object.external_market_check, "draft.external_market_check", errors);
-  const productConcept = validateString(object.product_concept, "draft.product_concept", errors);
-  const mvpScope = validateStringArray(object.mvp_scope, "draft.mvp_scope", errors);
-  const implementationPlan = validateStringArray(object.implementation_plan, "draft.implementation_plan", errors);
-  const distributionPlan = validateStringArray(object.distribution_plan, "draft.distribution_plan", errors);
-  const risks = validateStringArray(object.risks, "draft.risks", errors);
-  const decisionForHumanReview = validateString(
-    object.decision_for_human_review,
-    "draft.decision_for_human_review",
+  const thesis = validateString(object.thesis, 'draft.thesis', errors);
+  const evidenceFromInbox = validateStringArray(
+    object.evidence_from_inbox,
+    'draft.evidence_from_inbox',
     errors,
   );
+  const evidenceFromTelegram = validateStringArray(
+    object.evidence_from_telegram,
+    'draft.evidence_from_telegram',
+    errors,
+  );
+  const evidenceFromReddit = validateStringArray(
+    object.evidence_from_reddit,
+    'draft.evidence_from_reddit',
+    errors,
+  );
+  const externalMarketCheck = validateStringArray(
+    object.external_market_check,
+    'draft.external_market_check',
+    errors,
+  );
+  const productConcept = validateString(
+    object.product_concept,
+    'draft.product_concept',
+    errors,
+  );
+  const mvpScope = validateStringArray(
+    object.mvp_scope,
+    'draft.mvp_scope',
+    errors,
+  );
+  const implementationPlan = validateStringArray(
+    object.implementation_plan,
+    'draft.implementation_plan',
+    errors,
+  );
+  const distributionPlan = validateStringArray(
+    object.distribution_plan,
+    'draft.distribution_plan',
+    errors,
+  );
+  const risks = validateStringArray(object.risks, 'draft.risks', errors);
 
   if (errors.length) {
     return { errors, value: null };
@@ -195,7 +262,6 @@ export function validateResearchDraft(input: unknown): ValidationResult<Validate
   return {
     errors,
     value: {
-      decision_for_human_review: decisionForHumanReview!,
       distribution_plan: distributionPlan!,
       evidence_from_inbox: evidenceFromInbox!,
       evidence_from_reddit: evidenceFromReddit!,

@@ -465,7 +465,7 @@ function markRowsSucceeded(
           repo_url: config.repoUrl,
         },
         runId: row.run_id,
-        stage: 'review',
+        stage: 'artifact',
         status: 'ok',
         summary: 'Artifact export completed.',
       });
@@ -511,7 +511,7 @@ function markRowFailed(
       repo_url: config?.repoUrl ?? row.repo_url,
     },
     runId: row.run_id,
-    stage: 'review',
+    stage: 'artifact',
     status: 'error',
     summary: 'Artifact export failed.',
   });
@@ -535,7 +535,7 @@ function recordStartedEvents(
           repo_url: config.repoUrl,
         },
         runId: row.run_id,
-        stage: 'review',
+        stage: 'artifact',
         status: 'info',
         summary: 'Artifact export started.',
       });
@@ -704,7 +704,7 @@ export function queueIdeaMazeArtifactExportBackfill(
               repo_url: config.repoUrl,
             },
             runId: row.run_id,
-            stage: 'review',
+            stage: 'artifact',
             status: 'info',
             summary: 'Artifact export queued for host processing.',
           });

@@ -3,10 +3,10 @@
  * Ported from idea-maze-lab flows/harvest.md and flows/research.md.
  */
 
-export const HARVEST_PROMPT_NAME = "idea-maze-harvest";
-export const HARVEST_PROMPT_VERSION = "2026-04-20.1";
-export const RESEARCH_PROMPT_NAME = "idea-maze-research";
-export const RESEARCH_PROMPT_VERSION = "2026-04-20.1";
+export const HARVEST_PROMPT_NAME = 'idea-maze-harvest';
+export const HARVEST_PROMPT_VERSION = '2026-04-20.1';
+export const RESEARCH_PROMPT_NAME = 'idea-maze-research';
+export const RESEARCH_PROMPT_VERSION = '2026-04-20.1';
 
 export const HARVEST_SYSTEM_PROMPT = `You are an analyst extracting product opportunity signals from raw source content.
 
@@ -56,8 +56,8 @@ export function buildHarvestUserPrompt(item: {
   return `Analyze this source item and extract product opportunity insights.
 
 Source: ${item.source}
-Channel/Label: ${item.channel_or_label ?? "None"}
-Title: ${item.title || "None"}
+Channel/Label: ${item.channel_or_label ?? 'None'}
+Title: ${item.title || 'None'}
 Harvest Score: ${item.harvest_score}
 
 Content:
@@ -88,22 +88,28 @@ Return JSON with this exact structure:
 Return 1-3 insights. Only include high-confidence signals. Return an empty insights array if nothing meaningful can be extracted.`;
 }
 
-export function buildBatchHarvestUserPrompt(items: Array<{
-  index: number;
-  source: string;
-  channel_or_label?: string | null;
-  title: string;
-  text: string;
-  harvest_score: number;
-}>): string {
-  const itemBlocks = items.map((item) => `
+export function buildBatchHarvestUserPrompt(
+  items: Array<{
+    index: number;
+    source: string;
+    channel_or_label?: string | null;
+    title: string;
+    text: string;
+    harvest_score: number;
+  }>,
+): string {
+  const itemBlocks = items
+    .map(
+      (item) => `
 --- ITEM ${item.index} ---
 Source: ${item.source}
-Channel/Label: ${item.channel_or_label ?? "None"}
-Title: ${item.title || "None"}
+Channel/Label: ${item.channel_or_label ?? 'None'}
+Title: ${item.title || 'None'}
 Harvest Score: ${item.harvest_score}
 Content:
-${item.text.slice(0, 1500)}`).join("\n");
+${item.text.slice(0, 1500)}`,
+    )
+    .join('\n');
 
   return `Analyze each source item below and extract product opportunity insights.
 
@@ -139,14 +145,14 @@ Return JSON with this exact structure:
 Include an entry for every item index. Return empty insights array for items with no meaningful signal. Return 0-3 insights per item.`;
 }
 
-export const RESEARCH_SYSTEM_PROMPT = `You are a product researcher turning a shortlisted opportunity into a reviewable research artifact.
+export const RESEARCH_SYSTEM_PROMPT = `You are a product researcher turning a shortlisted opportunity into an automated research artifact.
 
 ## Core Principles
 - Verify the pain before expanding the idea.
 - Follow connected pains until the solution becomes a workflow.
 - Repetition matters more than novelty.
 - The best businesses come from owning the chain of friction, not one isolated feature.
-- Research should produce a buildable, reviewable artifact, not a vague market essay.
+- Research should produce a buildable artifact, not a vague market essay.
 - Prefer businesses a solo founder or two-person team can build, sell, and support.
 - Prefer self-serve subscriptions in roughly the $5-$50/month range.
 
@@ -176,11 +182,12 @@ export function buildResearchUserPrompt(opp: {
   external_research: string[];
   search_synthesis?: string[];
 }): string {
-  const fmtList = (items: string[]) => items.length ? items.map((s) => `- ${s}`).join("\n") : "- None";
+  const fmtList = (items: string[]) =>
+    items.length ? items.map((s) => `- ${s}`).join('\n') : '- None';
 
   const synthSection = opp.search_synthesis?.length
-    ? `\n## Web Search Synthesis\n${opp.search_synthesis.map((a, i) => `Query ${i + 1}: ${a}`).join("\n\n")}\n`
-    : "";
+    ? `\n## Web Search Synthesis\n${opp.search_synthesis.map((a, i) => `Query ${i + 1}: ${a}`).join('\n\n')}\n`
+    : '';
 
   return `Research this opportunity and produce a detailed draft.
 
@@ -211,7 +218,6 @@ Return JSON with this exact structure:
   "mvp_scope": ["scope item 1", ...],
   "implementation_plan": ["step 1", ...],
   "distribution_plan": ["channel 1", ...],
-  "risks": ["risk 1", ...],
-  "decision_for_human_review": "A clear statement for the reviewer"
+  "risks": ["risk 1", ...]
 }`;
 }

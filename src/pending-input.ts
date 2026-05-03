@@ -24,10 +24,6 @@ const DIRECT_COMMAND_PATTERNS = [
   /^top\s+\d+\b/i,
 ];
 
-const WORKFLOW_REPLY_PATTERNS = [
-  /^(?:approve|reject)\s+(?:run\s+)?(?:\d+(?:[\s,]+\d+)*|all|none|first|second|third|last)$/i,
-];
-
 const ASSISTANT_REPLY_PATTERNS = [
   /^\d+(?:[\s,]+\d+)*$/,
   /^(?:yes|no|go|do it|all|none|first|second|third|last)$/i,
@@ -85,16 +81,6 @@ function classifyMessageKind(
       kind: 'command',
       confidence: 0.99,
       reason: 'matched explicit command pattern',
-      classifier: 'heuristic',
-    };
-  }
-
-  if (WORKFLOW_REPLY_PATTERNS.some((pattern) => pattern.test(text))) {
-    return {
-      source: 'user',
-      kind: 'workflow_reply',
-      confidence: 0.98,
-      reason: 'matched workflow decision pattern',
       classifier: 'heuristic',
     };
   }

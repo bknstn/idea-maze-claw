@@ -1,6 +1,6 @@
 # Idea Maze
 
-Idea Maze is a personal product discovery system built around a Reddit-first pipeline. It harvests signals, extracts typed insights, clusters opportunities, runs bounded research, and stores artifacts for review.
+Idea Maze is a personal product discovery system built around a Reddit-first pipeline. It harvests signals, extracts typed insights, clusters opportunities, runs bounded research, and publishes artifact files.
 
 This repository is a fork of NanoClaw. NanoClaw provides the underlying chat agent runtime, container isolation, and task scheduling. The README here is intentionally about Idea Maze itself.
 
@@ -9,9 +9,9 @@ This repository is a fork of NanoClaw. NanoClaw provides the underlying chat age
 - Harvests raw source material from Reddit into `groups/idea-maze/data/lab.db`
 - Extracts typed signals such as pain points, demand signals, and workflow gaps
 - Clusters signals into opportunities with market and founder-fit scoring
-- Routes opportunities through `scored`, `shortlisted`, `researching`, `review_gate`, `approved`, `rejected`, and `archived`
-- Produces reviewable research artifacts under `groups/idea-maze/data/artifacts/`
-- Can mirror approved artifacts into a dedicated private Git repo for downstream review workflows
+- Routes opportunities through an automated score-bucket pipeline
+- Publishes research artifacts under `groups/idea-maze/data/artifacts/`
+- Can mirror generated artifacts into a dedicated private Git repo for downstream workflows
 
 Reddit is the active automated source on `main`. Gmail and Telegram ingestors are scaffolded but currently disabled.
 
@@ -45,18 +45,18 @@ Default schedule:
 - Daily 08:00: run `groups/idea-maze/scripts/run-pipeline.ts`
 - Daily 03:00: run raw file cleanup for snapshots older than 30 days
 
-The daily pipeline is the primary review surface. It ingests fresh Reddit source material, extracts insights, refreshes scored opportunities, and routes score-bucket `9-10` opportunities through automated research and approval. When those high-score opportunities appear, the same run should land Markdown artifacts under `groups/idea-maze/data/artifacts/` and optionally mirror them to the configured artifact repo.
+The daily pipeline is the primary operating surface. It ingests fresh Reddit source material, extracts insights, refreshes scored opportunities, and routes score-bucket `9-10` opportunities through automated research and artifact publication. When those high-score opportunities appear, the same run should land Markdown artifacts under `groups/idea-maze/data/artifacts/` and optionally mirror them to the configured artifact repo.
 
 ## Pipeline
 
-| Stage | Script | Output |
-|------|--------|--------|
-| Harvest | `ingest-reddit.ts` | Raw `source_items` and harvest scores |
-| Insights | `extract-insights.ts` | Typed signals |
-| Opportunities | `refresh-opportunities.ts` | Clustered opportunities with market and taste scoring |
-| Processing | `process-opportunities.ts` | Queueing, score-bucket `9-10` auto-research, auto-approval, and review-gate decisions |
-| Research | `research-opportunity.ts <slug>` | Draft thesis plus validation log |
-| Artifacts | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` and optional GitHub repo mirror |
+| Stage         | Script                           | Output                                                                           |
+| ------------- | -------------------------------- | -------------------------------------------------------------------------------- |
+| Harvest       | `ingest-reddit.ts`               | Raw `source_items` and harvest scores                                            |
+| Insights      | `extract-insights.ts`            | Typed signals                                                                    |
+| Opportunities | `refresh-opportunities.ts`       | Clustered opportunities with market and taste scoring                            |
+| Processing    | `process-opportunities.ts`       | Score-bucket `9-10` auto-research, artifact publication, and low-score skips     |
+| Research      | `research-opportunity.ts <slug>` | Draft thesis plus validation log                                                 |
+| Artifacts     | Automated publication            | Markdown reports in `data/artifacts/YYYY/MM/DD/` and optional GitHub repo mirror |
 
 Run the scheduled stages manually:
 
@@ -102,7 +102,7 @@ Telegram -> SQLite -> NanoClaw runtime -> isolated container agent
 Key paths:
 
 - `groups/idea-maze/data/lab.db`: pipeline state
-- `groups/idea-maze/data/artifacts/`: approved research outputs
+- `groups/idea-maze/data/artifacts/`: generated research outputs
 - `groups/idea-maze/data/artifacts-repo/`: default local checkout used for optional artifact repo mirroring
 - `groups/idea-maze/scripts/`: ingestion, scoring, research, and observability scripts
 - `src/index.ts`: host orchestrator
@@ -111,7 +111,7 @@ Key paths:
 
 Optional artifact mirror config:
 
-- `IDEA_MAZE_ARTIFACTS_REPO_URL`: SSH URL of the private repo that should receive approved artifacts
+- `IDEA_MAZE_ARTIFACTS_REPO_URL`: SSH URL of the private repo that should receive generated artifacts
 - `IDEA_MAZE_ARTIFACTS_REPO_BRANCH`: branch to push to, defaults to `main`
 - `IDEA_MAZE_ARTIFACTS_REPO_DIR`: optional checkout path override; defaults to `groups/idea-maze/data/artifacts-repo/` inside the active group workspace
 

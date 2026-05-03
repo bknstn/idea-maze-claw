@@ -6,6 +6,7 @@ export const OPPORTUNITY_LIFECYCLE_STAGES = [
   "scored",
   "shortlisted",
   "researching",
+  "artifact",
   "review_gate",
   "approved",
   "rejected",

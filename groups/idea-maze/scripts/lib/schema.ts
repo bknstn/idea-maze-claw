@@ -1,6 +1,6 @@
-import type Database from "better-sqlite3";
+import type Database from 'better-sqlite3';
 
-import { AUTO_APPROVE_MIN_BUCKET } from "./opportunity-policy.ts";
+import { AUTO_PUBLISH_MIN_BUCKET } from './opportunity-policy.ts';
 
 /**
  * Initialize the full Idea Maze schema. Safe to call multiple times —
@@ -217,11 +217,13 @@ export function initSchema(db: Database.Database): void {
   // FTS5 tables — CREATE VIRTUAL TABLE doesn't support IF NOT EXISTS,
   // so we check for existence first.
   const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('source_items_fts','insights_fts','opportunities_fts')")
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('source_items_fts','insights_fts','opportunities_fts')",
+    )
     .all()
     .map((r: any) => r.name);
 
-  if (!tables.includes("source_items_fts")) {
+  if (!tables.includes('source_items_fts')) {
     db.exec(`
       CREATE VIRTUAL TABLE source_items_fts USING fts5(
         title, text,
@@ -231,7 +233,7 @@ export function initSchema(db: Database.Database): void {
     `);
   }
 
-  if (!tables.includes("insights_fts")) {
+  if (!tables.includes('insights_fts')) {
     db.exec(`
       CREATE VIRTUAL TABLE insights_fts USING fts5(
         summary,
@@ -241,7 +243,7 @@ export function initSchema(db: Database.Database): void {
     `);
   }
 
-  if (!tables.includes("opportunities_fts")) {
+  if (!tables.includes('opportunities_fts')) {
     db.exec(`
       CREATE VIRTUAL TABLE opportunities_fts USING fts5(
         title, thesis,
@@ -317,8 +319,9 @@ export function initSchema(db: Database.Database): void {
 
 function getColumnNames(db: Database.Database, table: string): Set<string> {
   return new Set(
-    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
-      .map((row) => row.name),
+    (
+      db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+    ).map((row) => row.name),
   );
 }
 
@@ -335,10 +338,30 @@ function addColumnIfMissing(
 }
 
 function ensureCompatibilityColumns(db: Database.Database): void {
-  addColumnIfMissing(db, "opportunities", "market_score", "REAL NOT NULL DEFAULT 0");
-  addColumnIfMissing(db, "opportunities", "taste_adjustment", "REAL NOT NULL DEFAULT 0");
-  addColumnIfMissing(db, "opportunities", "final_score", "REAL NOT NULL DEFAULT 0");
-  addColumnIfMissing(db, "opportunities", "lifecycle_stage", "TEXT NOT NULL DEFAULT 'scored'");
+  addColumnIfMissing(
+    db,
+    'opportunities',
+    'market_score',
+    'REAL NOT NULL DEFAULT 0',
+  );
+  addColumnIfMissing(
+    db,
+    'opportunities',
+    'taste_adjustment',
+    'REAL NOT NULL DEFAULT 0',
+  );
+  addColumnIfMissing(
+    db,
+    'opportunities',
+    'final_score',
+    'REAL NOT NULL DEFAULT 0',
+  );
+  addColumnIfMissing(
+    db,
+    'opportunities',
+    'lifecycle_stage',
+    "TEXT NOT NULL DEFAULT 'scored'",
+  );
 }
 
 function ensureCompatibilityIndexes(db: Database.Database): void {
@@ -369,15 +392,15 @@ function backfillOpportunityState(db: Database.Database): void {
   db.exec(`
     UPDATE opportunities
     SET lifecycle_stage = CASE
-      WHEN EXISTS (
-        SELECT 1 FROM artifacts a
-        WHERE a.opportunity_id = opportunities.id
-      ) THEN 'approved'
-      WHEN EXISTS (
-        SELECT 1 FROM runs r
-        WHERE r.target_id = CAST(opportunities.id AS TEXT)
-          AND r.status = 'review_gate'
-      ) THEN 'review_gate'
+	      WHEN EXISTS (
+	        SELECT 1 FROM artifacts a
+	        WHERE a.opportunity_id = opportunities.id
+	      ) THEN 'artifact'
+	      WHEN EXISTS (
+	        SELECT 1 FROM runs r
+	        WHERE r.target_id = CAST(opportunities.id AS TEXT)
+	          AND r.status IN ('draft_ready', 'review_gate')
+	      ) THEN 'researching'
       WHEN EXISTS (
         SELECT 1 FROM runs r
         WHERE r.target_id = CAST(opportunities.id AS TEXT)
@@ -386,10 +409,10 @@ function backfillOpportunityState(db: Database.Database): void {
       WHEN EXISTS (
         SELECT 1 FROM runs r
         WHERE r.target_id = CAST(opportunities.id AS TEXT)
-          AND r.status = 'rejected'
-      ) THEN 'rejected'
+	          AND r.status = 'rejected'
+	      ) THEN 'archived'
       WHEN status = 'archived' THEN 'archived'
-      WHEN final_score >= ${AUTO_APPROVE_MIN_BUCKET} THEN 'shortlisted'
+      WHEN final_score >= ${AUTO_PUBLISH_MIN_BUCKET} THEN 'shortlisted'
       ELSE 'scored'
     END
     WHERE lifecycle_stage IS NULL
@@ -401,6 +424,29 @@ function backfillOpportunityState(db: Database.Database): void {
     UPDATE opportunities
     SET lifecycle_stage = 'archived'
     WHERE status = 'archived'
-      AND lifecycle_stage NOT IN ('approved', 'review_gate', 'researching')
+	      AND lifecycle_stage NOT IN ('artifact', 'researching')
+	  `);
+
+  db.exec(`
+    UPDATE opportunities
+    SET lifecycle_stage = 'artifact'
+    WHERE lifecycle_stage = 'approved'
+       OR EXISTS (
+         SELECT 1 FROM artifacts a
+         WHERE a.opportunity_id = opportunities.id
+       )
+  `);
+
+  db.exec(`
+    UPDATE opportunities
+    SET lifecycle_stage = 'researching'
+    WHERE lifecycle_stage = 'review_gate'
+  `);
+
+  db.exec(`
+    UPDATE opportunities
+    SET lifecycle_stage = 'archived',
+        status = 'archived'
+    WHERE lifecycle_stage = 'rejected'
   `);
 }

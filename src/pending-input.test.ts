@@ -37,21 +37,6 @@ describe('classifyPendingInput', () => {
     });
   });
 
-  it('classifies review decisions as workflow replies', () => {
-    expect(
-      classifyPendingInput([makeMessage('approve 9 11')], 'Idea Maze'),
-    ).toEqual({
-      source: 'user',
-      kind: 'workflow_reply',
-    });
-    expect(
-      classifyPendingInput([makeMessage('reject run 10')], 'Idea Maze'),
-    ).toEqual({
-      source: 'user',
-      kind: 'workflow_reply',
-    });
-  });
-
   it('classifies short reply-to-assistant selections as workflow replies', () => {
     expect(
       classifyPendingInput(
@@ -142,7 +127,10 @@ describe('classifyPendingInput', () => {
   it('keeps the highest-priority actionable kind across a batch', () => {
     expect(
       classifyPendingInput(
-        [makeMessage('thanks'), makeMessage('approve 9', { id: 'msg-2' })],
+        [
+          makeMessage('thanks'),
+          makeMessage('clear the queue', { id: 'msg-2' }),
+        ],
         'Idea Maze',
       ),
     ).toEqual({

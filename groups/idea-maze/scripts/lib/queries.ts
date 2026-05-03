@@ -1,13 +1,13 @@
-import type Database from "better-sqlite3";
-import { getDb } from "./db.ts";
+import type Database from 'better-sqlite3';
+import { getDb } from './db.ts';
 
 // --- App State ---
 
 export function getAppState(key: string): any | null {
   const db = getDb();
-  const row = db.prepare("SELECT value_json FROM app_state WHERE key = ?").get(key) as
-    | { value_json: string }
-    | undefined;
+  const row = db
+    .prepare('SELECT value_json FROM app_state WHERE key = ?')
+    .get(key) as { value_json: string } | undefined;
   if (!row) return null;
   return JSON.parse(row.value_json);
 }
@@ -63,9 +63,10 @@ export interface UpsertSourceItem {
  * Deduplicates on (source, external_id). On conflict, updates metadata
  * and text but preserves the original ingested_at_utc.
  */
-export function upsertSourceItem(
-  item: UpsertSourceItem,
-): { id: number; isNew: boolean } {
+export function upsertSourceItem(item: UpsertSourceItem): {
+  id: number;
+  isNew: boolean;
+} {
   const db = getDb();
   const now = new Date().toISOString();
   const metaStr = JSON.stringify(item.metadata_json);
@@ -92,7 +93,7 @@ export function upsertSourceItem(
     now,
     item.raw_path,
     item.content_hash,
-    item.sensitivity ?? "normal",
+    item.sensitivity ?? 'normal',
     metaStr,
   );
 
@@ -101,15 +102,25 @@ export function upsertSourceItem(
   }
 
   // Row exists — update mutable fields
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE source_items
     SET text = ?, title = ?, metadata_json = ?, content_hash = ?, raw_path = ?
     WHERE source = ? AND external_id = ?
-  `).run(item.text, item.title ?? null, metaStr, item.content_hash, item.raw_path, item.source, item.external_id);
+  `,
+  ).run(
+    item.text,
+    item.title ?? null,
+    metaStr,
+    item.content_hash,
+    item.raw_path,
+    item.source,
+    item.external_id,
+  );
 
-  const existing = db.prepare(
-    "SELECT id FROM source_items WHERE source = ? AND external_id = ?",
-  ).get(item.source, item.external_id) as { id: number };
+  const existing = db
+    .prepare('SELECT id FROM source_items WHERE source = ? AND external_id = ?')
+    .get(item.source, item.external_id) as { id: number };
 
   return { id: existing.id, isNew: false };
 }
@@ -136,7 +147,9 @@ export function getUnprocessedItems(limit = 100): SourceItemRow[] {
 export function getItemsBySource(source: string, limit = 100): SourceItemRow[] {
   const db = getDb();
   return db
-    .prepare("SELECT * FROM source_items WHERE source = ? ORDER BY timestamp_utc DESC LIMIT ?")
+    .prepare(
+      'SELECT * FROM source_items WHERE source = ? ORDER BY timestamp_utc DESC LIMIT ?',
+    )
     .all(source, limit) as SourceItemRow[];
 }
 
@@ -162,7 +175,10 @@ export function searchSourceItems(query: string, limit = 50): SourceItemRow[] {
  * Acquire a run lock for a pipeline stage. Returns true if acquired.
  * Prevents overlapping runs of the same type. Lock expires after maxAgeMs.
  */
-export function acquireRunLock(stage: string, maxAgeMs = 30 * 60 * 1000): boolean {
+export function acquireRunLock(
+  stage: string,
+  maxAgeMs = 30 * 60 * 1000,
+): boolean {
   const db = getDb();
   const now = new Date();
   const lockKey = `lock:${stage}`;
@@ -182,7 +198,7 @@ export function acquireRunLock(stage: string, maxAgeMs = 30 * 60 * 1000): boolea
  */
 export function releaseRunLock(stage: string): void {
   const db = getDb();
-  db.prepare("DELETE FROM app_state WHERE key = ?").run(`lock:${stage}`);
+  db.prepare('DELETE FROM app_state WHERE key = ?').run(`lock:${stage}`);
 }
 
 // --- Counts ---
@@ -196,10 +212,21 @@ export function getCounts(): {
 } {
   const db = getDb();
   return {
-    source_items: (db.prepare("SELECT COUNT(*) as n FROM source_items").get() as any).n,
-    insights: (db.prepare("SELECT COUNT(*) as n FROM insights").get() as any).n,
-    opportunities: (db.prepare("SELECT COUNT(*) as n FROM opportunities").get() as any).n,
-    runs_pending: (db.prepare("SELECT COUNT(*) as n FROM runs WHERE status IN ('review_gate', 'running')").get() as any).n,
-    artifacts: (db.prepare("SELECT COUNT(*) as n FROM artifacts").get() as any).n,
+    source_items: (
+      db.prepare('SELECT COUNT(*) as n FROM source_items').get() as any
+    ).n,
+    insights: (db.prepare('SELECT COUNT(*) as n FROM insights').get() as any).n,
+    opportunities: (
+      db.prepare('SELECT COUNT(*) as n FROM opportunities').get() as any
+    ).n,
+    runs_pending: (
+      db
+        .prepare(
+          "SELECT COUNT(*) as n FROM runs WHERE status IN ('draft_ready', 'review_gate', 'running')",
+        )
+        .get() as any
+    ).n,
+    artifacts: (db.prepare('SELECT COUNT(*) as n FROM artifacts').get() as any)
+      .n,
   };
 }
