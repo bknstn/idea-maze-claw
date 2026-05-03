@@ -3,6 +3,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { TIMEZONE } from '../src/config.js';
 import {
   createTask,
+  deleteTask,
   getAllRegisteredGroups,
   getTaskById,
   initDatabase,
@@ -24,16 +25,8 @@ const TASK_DEFINITIONS: TaskDefinition[] = [
     id: 'idea-maze-pipeline',
     prompt:
       'Run the active Idea Maze pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report a concise results summary.',
-    schedule_type: 'interval',
-    schedule_value: '3600000',
-    context_mode: 'isolated',
-  },
-  {
-    id: 'idea-maze-weekly-digest',
-    prompt:
-      'Generate the weekly Idea Maze digest. Query the top 10 opportunities from lab.db ordered by score. Include title, score, insight count, and top signals. Format as a concise report.',
     schedule_type: 'cron',
-    schedule_value: '0 8 * * 1',
+    schedule_value: '0 8 * * *',
     context_mode: 'isolated',
   },
   {
@@ -55,12 +48,16 @@ const TASK_DEFINITIONS: TaskDefinition[] = [
   },
 ];
 
+const RETIRED_TASK_IDS = ['idea-maze-weekly-digest'];
+
 function computeInitialNextRun(
   scheduleType: ScheduledTask['schedule_type'],
   scheduleValue: string,
 ): string | null {
   if (scheduleType === 'cron') {
-    const interval = CronExpressionParser.parse(scheduleValue, { tz: TIMEZONE });
+    const interval = CronExpressionParser.parse(scheduleValue, {
+      tz: TIMEZONE,
+    });
     return interval.next().toISOString();
   }
 
@@ -94,8 +91,18 @@ function main(): void {
 
   const [chatJid] = ideaMazeEntry;
 
+  for (const taskId of RETIRED_TASK_IDS) {
+    if (getTaskById(taskId)) {
+      deleteTask(taskId);
+      console.log(`Removed retired task ${taskId}`);
+    }
+  }
+
   for (const task of TASK_DEFINITIONS) {
-    const nextRun = computeInitialNextRun(task.schedule_type, task.schedule_value);
+    const nextRun = computeInitialNextRun(
+      task.schedule_type,
+      task.schedule_value,
+    );
     const existing = getTaskById(task.id);
 
     if (existing) {

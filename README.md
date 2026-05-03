@@ -40,6 +40,13 @@ Restore the default Idea Maze schedule after setup or a fresh deploy:
 npx tsx scripts/setup-idea-maze-schedule.ts
 ```
 
+Default schedule:
+
+- Daily 08:00: run `groups/idea-maze/scripts/run-pipeline.ts`
+- Daily 03:00: run raw file cleanup for snapshots older than 30 days
+
+The daily pipeline is the primary review surface. It ingests fresh Reddit source material, extracts insights, refreshes scored opportunities, and routes score-bucket `9-10` opportunities through automated research and approval. When those high-score opportunities appear, the same run should land Markdown artifacts under `groups/idea-maze/data/artifacts/` and optionally mirror them to the configured artifact repo.
+
 ## Pipeline
 
 | Stage | Script | Output |
@@ -47,7 +54,7 @@ npx tsx scripts/setup-idea-maze-schedule.ts
 | Harvest | `ingest-reddit.ts` | Raw `source_items` and harvest scores |
 | Insights | `extract-insights.ts` | Typed signals |
 | Opportunities | `refresh-opportunities.ts` | Clustered opportunities with market and taste scoring |
-| Processing | `process-opportunities.ts` | Queueing, auto-approval, and review-gate decisions |
+| Processing | `process-opportunities.ts` | Queueing, score-bucket `9-10` auto-research, auto-approval, and review-gate decisions |
 | Research | `research-opportunity.ts <slug>` | Draft thesis plus validation log |
 | Artifacts | `approve-run.ts <run_id>` | Markdown reports in `data/artifacts/YYYY/MM/DD/` and optional GitHub repo mirror |
 
